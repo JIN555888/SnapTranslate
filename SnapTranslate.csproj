@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <AssemblyName>SnapTranslate</AssemblyName>
+    <RootNamespace>SnapTranslate</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+
+    <!-- 실행 파일 속성(파일 정보)에 들어가는 값. 버전을 올릴 때는 Version 만 바꾼다 -->
+    <Version>1.0.0</Version>
+    <Product>SnapTranslate</Product>
+    <Description>단축키로 화면 영역을 캡처해 글자를 인식(OCR)하고 번역합니다.</Description>
+    <Authors>참발자</Authors>
+    <Company>참발자</Company>
+    <Copyright>Copyright © 2026 참발자</Copyright>
+    <NeutralLanguage>ko-KR</NeutralLanguage>
+    <SatelliteResourceLanguages>ko</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 트레이·설정 창 아이콘으로 쓰려고 실행 파일 안에도 넣는다 (tools\make-icon.ps1 로 생성) -->
+    <EmbeddedResource Include="app.ico" LogicalName="app.ico" />
+  </ItemGroup>
+
+</Project>
