@@ -57,6 +57,9 @@ internal sealed class AppConfig
     /// <summary>결과 창에서 Esc 를 누르면 창을 닫을지</summary>
     public bool CloseOnEsc { get; set; } = true;
 
+    /// <summary>프로그램을 시작할 때 Windows 알림으로 단축키 안내를 보일지(기본은 끔)</summary>
+    public bool ShowStartupNotice { get; set; } = false;
+
     /// <summary>프로그램을 시작할 때 새 버전이 있는지 확인할지</summary>
     public bool CheckUpdateOnStart { get; set; } = true;
 
@@ -302,7 +305,8 @@ internal sealed class TrayContext : ApplicationContext
             _tray.ShowBalloonTip(5000, "SnapTranslate", "config.json 을 읽지 못해 기본값으로 실행합니다: " + configError, ToolTipIcon.Warning);
         else if (!_hotkey.Register(_config.Hotkey))
             _tray.ShowBalloonTip(5000, "SnapTranslate", $"단축키 {_config.Hotkey} 등록 실패. 다른 프로그램이 쓰고 있거나 형식이 잘못됐습니다. config.json 의 Hotkey 를 바꾸세요.", ToolTipIcon.Warning);
-        else
+        else if (_config.ShowStartupNotice)
+            // 시작 안내는 설정에서 켠 경우에만 보인다. 위의 실패 경고는 설정과 관계없이 항상 보인다
             _tray.ShowBalloonTip(2500, "SnapTranslate", $"{_config.Hotkey} 를 누르고 마우스로 영역을 끌어 선택하세요.", ToolTipIcon.Info);
 
         if (configError != null) _hotkey.Register(_config.Hotkey);

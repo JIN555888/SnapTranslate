@@ -36,6 +36,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _autoCopy;
     private readonly CheckBox _reuseWindow;
     private readonly CheckBox _closeOnEsc;
+    private readonly CheckBox _startupNotice;
     private readonly CheckBox _checkUpdate;
     private readonly Label _updateStatus;
 
@@ -127,6 +128,7 @@ internal sealed class SettingsForm : Form
         _autoCopy = CreateCheck("번역이 끝나면 번역문을 자동 복사");
         _reuseWindow = CreateCheck("같은 창에 계속 표시");
         _closeOnEsc = CreateCheck("Esc 키로 창 닫기");
+        _startupNotice = CreateCheck("시작할 때 Windows 알림 표시");
 
         // ---- 크기 ----
         _opacity = new ValueSlider(30, 100, 1, "%", Theme.Card);
@@ -184,6 +186,9 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "자동 닫힘(초)", _autoClose);
         AddHint(grid, "0 = 닫지 않음. 마우스가 창 위에 있으면 안 닫힘");
         AddRow(grid, "", _autoCopy);
+        AddSeparator(grid);
+        AddRow(grid, "알림", _startupNotice);
+        AddHint(grid, "단축키 등록 실패 같은 경고는 꺼도 표시됩니다");
 
         grid = NewPage("크기", "결과 창의 불투명도와 가로·세로 크기");
         AddRow(grid, "불투명도", _opacity);
@@ -365,6 +370,7 @@ internal sealed class SettingsForm : Form
             _reuseWindow.Checked = c.ReuseWindow;
             _closeOnEsc.Checked = c.CloseOnEsc;
             _checkUpdate.Checked = c.CheckUpdateOnStart;
+            _startupNotice.Checked = c.ShowStartupNotice;
 
             _opacity.Value = c.Opacity;
             _width.Value = c.WindowWidth;
@@ -412,6 +418,7 @@ internal sealed class SettingsForm : Form
         c.ReuseWindow = _reuseWindow.Checked;
         c.CloseOnEsc = _closeOnEsc.Checked;
         c.CheckUpdateOnStart = _checkUpdate.Checked;
+        c.ShowStartupNotice = _startupNotice.Checked;
 
         c.Opacity = (int)_opacity.Value;
         c.WindowWidth = (int)_width.Value;
