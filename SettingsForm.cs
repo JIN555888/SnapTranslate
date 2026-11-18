@@ -263,10 +263,10 @@ internal sealed class SettingsForm : Form
             _updateStatus.Text = "확인 중…";
             UpdateResult result = await UpdateService.CheckAsync();
             if (IsDisposed) return;
-            checkNow.Enabled = true;
             _updateStatus.Text = result.Message;
-            if (result.Available && MessageBox.Show(this, result.Message + "\n내려받기 화면을 열까요?", AppInfo.Name, MessageBoxButtons.YesNo) == DialogResult.Yes)
-                AppInfo.OpenUrl(result.Url);
+            // 새 버전이면 설치할지 묻고, 내려받아 설치한 뒤 다시 시작한다
+            await UpdateService.RunInteractiveAsync(this, result, text => { if (!IsDisposed) _updateStatus.Text = text; });
+            if (!IsDisposed) checkNow.Enabled = true;
         };
         AddRow(grid, "업데이트", _checkUpdate);
         AddRow(grid, "", checkNow);

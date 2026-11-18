@@ -20,6 +20,17 @@ internal static class Program
         if (args.Length >= 2 && args[0] == "--shot")
             return ShotTest.Run(args[1]);
 
+        // 업데이트를 설치하지만 다시 시작하지는 않는 점검 모드(설치 과정 확인용)
+        if (args.Length >= 2 && args[0] == "--update-test")
+            return SelfTest.RunUpdate(args[1]);
+
+        // 업데이트 직후 새로 띄워진 경우: 이전 프로그램이 완전히 끝날 때까지 기다린다(중복 실행으로 오해하지 않게)
+        if (args.Length >= 2 && args[0] == "--after-update" && int.TryParse(args[1], out int oldPid))
+        {
+            try { Process.GetProcessById(oldPid).WaitForExit(10000); }
+            catch (ArgumentException) { /* 이미 끝났다 */ }
+        }
+
         // 중복 실행 방지
         using var mutex = new Mutex(true, "SnapTranslate.SingleInstance", out bool created);
         if (!created)
@@ -28,6 +39,7 @@ internal static class Program
             return 0;
         }
 
+        UpdateService.CleanupOldFiles();
         Application.Run(new TrayContext());
         return 0;
     }
@@ -276,7 +288,8 @@ internal sealed class TrayContext : ApplicationContext
     private readonly HotkeyWindow _hotkey = new();
     private bool _capturing;
     private bool _settingsOpen;
-    private string _updateUrl = "";    // 새 버전 알림을 눌렀을 때 열 주소
+    private UpdateResult? _pendingUpdate;   // 시작할 때 찾은 새 버전(알림을 누르면 설치)
+    private readonly ToolStripItem _updateItem;
     private ResultForm? _lastResult;  // 가장 최근에 연 결과 창(같은 창 재사용용)
     private readonly ToolStripItem _captureItem;
 
@@ -288,6 +301,7 @@ internal sealed class TrayContext : ApplicationContext
         var menu = new ContextMenuStrip();
         _captureItem = menu.Items.Add($"영역 캡처 번역 ({_config.Hotkey})", null, (_, _) => StartCapture());
         menu.Items.Add("설정…", null, (_, _) => OpenSettings());
+        _updateItem = menu.Items.Add("업데이트 확인", null, (_, _) => CheckUpdateFromMenu());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("종료", null, (_, _) => ExitThread());
 
@@ -311,11 +325,12 @@ internal sealed class TrayContext : ApplicationContext
 
         if (configError != null) _hotkey.Register(_config.Hotkey);
 
-        _tray.BalloonTipClicked += (_, _) =>
+        _tray.BalloonTipClicked += async (_, _) =>
         {
-            // 새 버전 알림을 누르면 내려받기 화면을 연다
-            if (_updateUrl.Length > 0) AppInfo.OpenUrl(_updateUrl);
-            _updateUrl = "";
+            // 새 버전 알림을 누르면 업데이트할지 묻고 설치한다
+            if (_pendingUpdate is not { } update) return;
+            _pendingUpdate = null;
+            await UpdateService.RunInteractiveAsync(null, update, _ => { });
         };
         if (_config.CheckUpdateOnStart && AppInfo.Repo.Length > 0) CheckUpdateOnStart();
     }
@@ -325,8 +340,19 @@ internal sealed class TrayContext : ApplicationContext
     {
         UpdateResult result = await UpdateService.CheckAsync();
         if (!result.Available) return;
-        _updateUrl = result.Url;
-        _tray.ShowBalloonTip(8000, "SnapTranslate", result.Message + " 이 알림을 누르면 내려받기 화면이 열립니다.", ToolTipIcon.Info);
+        _pendingUpdate = result;
+        _updateItem.Text = $"업데이트 ({result.LatestVersion})…";
+        _tray.ShowBalloonTip(8000, "SnapTranslate", result.Message + " 이 알림을 누르면 업데이트합니다.", ToolTipIcon.Info);
+    }
+
+    /// <summary>트레이 메뉴의 "업데이트 확인": 새 버전이 있으면 설치할지 묻고, 없으면 결과만 알려 준다</summary>
+    private async void CheckUpdateFromMenu()
+    {
+        UpdateResult result = await UpdateService.CheckAsync();
+        if (result.Available)
+            await UpdateService.RunInteractiveAsync(null, result, _ => { });
+        else
+            MessageBox.Show($"{result.Message}\n(현재 {AppInfo.VersionText})", AppInfo.Name);
     }
 
     /// <summary>설정 창을 띄운다. 저장하면 단축키·투명도가 재시작 없이 바로 적용된다</summary>
@@ -521,6 +547,30 @@ internal static class ShotTest
 /// <summary>글자를 그린 그림으로 OCR → 번역 경로를 화면 없이 점검한다</summary>
 internal static class SelfTest
 {
+    /// <summary>새 버전을 확인해 내려받고 파일을 바꾸는 데까지 진행하고(다시 시작은 안 함) 과정을 파일에 적는다</summary>
+    public static int RunUpdate(string outputPath)
+    {
+        var log = new List<string> { $"시작 버전: {AppInfo.VersionText}", $"런타임 포함 배포본: {AppInfo.IsSelfContained}" };
+        try
+        {
+            UpdateResult update = Task.Run(UpdateService.CheckAsync).GetAwaiter().GetResult();
+            log.Add($"확인: {update.Message} / 내려받기: {update.DownloadUrl}");
+            if (update.Available)
+            {
+                Task.Run(() => UpdateService.InstallAsync(update, null)).GetAwaiter().GetResult();
+                log.Add("설치 완료");
+            }
+            File.WriteAllLines(outputPath, log);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            log.Add("실패: " + ex);
+            File.WriteAllLines(outputPath, log);
+            return 1;
+        }
+    }
+
     public static int Run(string outputPath)
     {
         try
