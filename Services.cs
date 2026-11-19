@@ -11,7 +11,7 @@ namespace SnapTranslate;
 
 internal readonly record struct OcrOutput(string Text, string Language);
 
-internal readonly record struct TranslateOutput(string Text, string SourceLang, string TargetLang);
+internal readonly record struct TranslateOutput(string Text, string SourceLang, string TargetLang, string Engine = "");
 
 /// <summary>Windows 내장 OCR(Windows.Media.Ocr). 인터넷 없이 로컬에서 동작한다</summary>
 internal static class OcrService
@@ -246,83 +246,5 @@ internal static class OcrService
         stream.Position = 0;
         var decoder = await BitmapDecoder.CreateAsync(stream.AsRandomAccessStream());
         return await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
-    }
-}
-
-/// <summary>Google 번역 웹 엔드포인트(키 없음). 인식한 글자가 Google 서버로 전송된다</summary>
-internal static class Translator
-{
-    private static readonly HttpClient Http = CreateClient();
-
-    private static HttpClient CreateClient()
-    {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0");
-        return client;
-    }
-
-    /// <summary>
-    /// source(auto 면 자동 감지) → target 으로 번역한다.
-    /// altTarget 을 주면, 원문이 이미 target 언어일 때 altTarget 으로 번역한다. null 이면 target 그대로 쓴다.
-    /// </summary>
-    public static async Task<TranslateOutput> TranslateAsync(string text, string source, string target, string? altTarget)
-    {
-        var first = await RequestAsync(text, source, target);
-        if (altTarget == null) return first;
-        bool sameLanguage = first.SourceLang.Length > 0 &&
-            first.SourceLang.Split('-')[0].Equals(target.Split('-')[0], StringComparison.OrdinalIgnoreCase);
-        if (sameLanguage && !altTarget.Equals(target, StringComparison.OrdinalIgnoreCase))
-            return await RequestAsync(text, source, altTarget);
-        return first;
-    }
-
-    // 같은 엔드포인트의 클라이언트 이름. 하나가 사용량 제한(429)에 걸리면 다음 것을 쓴다(응답 형식은 같다)
-    private static readonly string[] Clients = ["gtx", "dict-chrome-ex"];
-    private static int _clientIndex;
-
-    private static async Task<string> PostAsync(string text, string source, string target)
-    {
-        HttpRequestException? last = null;
-        for (int attempt = 0; attempt < Clients.Length; attempt++)
-        {
-            int index = (_clientIndex + attempt) % Clients.Length;
-            string url = "https://translate.googleapis.com/translate_a/single?dt=t&client=" + Clients[index] +
-                         "&sl=" + Uri.EscapeDataString(source) + "&tl=" + Uri.EscapeDataString(target);
-            // 긴 글도 보낼 수 있게 본문(POST)으로 보낸다
-            using var content = new FormUrlEncodedContent(new Dictionary<string, string> { ["q"] = text });
-            using var response = await Http.PostAsync(url, content);
-            if (response.IsSuccessStatusCode)
-            {
-                _clientIndex = index;   // 통한 클라이언트를 다음에도 먼저 쓴다
-                return await response.Content.ReadAsStringAsync();
-            }
-            last = new HttpRequestException($"번역 서버 응답 {(int)response.StatusCode} ({response.StatusCode})");
-            // 제한·차단이 아닌 오류는 클라이언트를 바꿔도 같으므로 바로 끝낸다
-            if ((int)response.StatusCode != 429 && (int)response.StatusCode != 403) break;
-        }
-        throw last ?? new HttpRequestException("번역 요청 실패");
-    }
-
-    private static async Task<TranslateOutput> RequestAsync(string text, string source, string target)
-    {
-        if (string.IsNullOrWhiteSpace(source)) source = "auto";
-        string body = await PostAsync(text, source, target);
-
-        // 응답 형식: [[["번역","원문",...],...], null, "감지 언어", ...]
-        using var doc = JsonDocument.Parse(body);
-        var root = doc.RootElement;
-        var sb = new StringBuilder();
-        if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0 && root[0].ValueKind == JsonValueKind.Array)
-        {
-            foreach (var segment in root[0].EnumerateArray())
-            {
-                if (segment.ValueKind == JsonValueKind.Array && segment.GetArrayLength() > 0 &&
-                    segment[0].ValueKind == JsonValueKind.String)
-                    sb.Append(segment[0].GetString());
-            }
-        }
-        string detected = root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 2 &&
-                          root[2].ValueKind == JsonValueKind.String ? root[2].GetString() ?? "" : "";
-        return new TranslateOutput(sb.ToString().Replace("\r\n", "\n").Replace("\n", "\r\n"), detected, target);
     }
 }

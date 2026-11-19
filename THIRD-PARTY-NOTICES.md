@@ -60,6 +60,17 @@ SOFTWARE.
 - 공식 유료 API 가 아닌 웹 번역 주소를 사용하므로, Google 의 정책에 따라 예고 없이 제한되거나 막힐 수 있습니다.
 - Google 및 Google 번역은 Google LLC 의 상표입니다.
 
+### 번역 — MyMemory
+
+- Translated 사의 공개 번역 API(`api.mymemory.translated.net`)를 키 없이 사용합니다. 하루 무료 사용량(약 5,000자)이 있습니다.
+- 번역 결과는 MyMemory 서비스가 만든 것입니다. SnapTranslate 는 Translated 와 제휴·보증 관계가 없습니다.
+
+### 번역 — Gemini API
+
+- 사용자가 직접 발급받아 입력한 API 키로 Google 의 Gemini API 를 호출합니다. 키는 사용자 PC 의 `config.json` 에만 저장됩니다.
+- 사용량·요금·데이터 처리는 사용자의 Google 계정과 Gemini API 약관을 따릅니다.
+- Gemini 는 Google LLC 의 상표입니다.
+
 ## 글꼴
 
 - 아이콘의 글자 "가"와 화면 기본 글꼴은 Windows 에 설치된 "맑은 고딕"(Microsoft)으로 그렸습니다. 글꼴 파일은 포함해 배포하지 않습니다.

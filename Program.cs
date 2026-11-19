@@ -61,6 +61,18 @@ internal sealed class AppConfig
     /// <summary>원문이 이미 TargetLang 이면 이 언어로 번역한다</summary>
     public string AltTargetLang { get; set; } = "en";
 
+    /// <summary>
+    /// 번역기 우선순위(google / mymemory / gemini). 앞의 것부터 쓰고, 실패하면 다음 것으로 넘어간다.
+    /// 하나만 적으면 그 번역기만 쓴다.
+    /// </summary>
+    public List<string> TranslateOrder { get; set; } = [Translator.Google, Translator.MyMemory, Translator.Gemini];
+
+    /// <summary>Gemini 번역에 쓰는 사용자 API 키. 비어 있으면 Gemini 를 쓰지 않는다</summary>
+    public string GeminiApiKey { get; set; } = "";
+
+    /// <summary>Gemini 모델 이름. 보통 바꿀 일이 없다</summary>
+    public string GeminiModel { get; set; } = Translator.DefaultGeminiModel;
+
     /// <summary>번역이 끝나면 번역문을 클립보드에 자동 복사</summary>
     public bool CopyTranslation { get; set; } = false;
 
@@ -154,6 +166,7 @@ internal sealed class AppConfig
         ShowCaptions = other.ShowCaptions;
         ShowOriginal = other.ShowOriginal;
         ShowTranslated = other.ShowTranslated;
+        ShowEngine = other.ShowEngine;
     }
 
     // 원문·번역 칸 말고 나머지 부분을 보일지
@@ -166,6 +179,12 @@ internal sealed class AppConfig
     public bool ShowOriginal { get; set; } = true;
     public bool ShowTranslated { get; set; } = true;
 
+    /// <summary>설정 창 오른쪽에 미리보기를 보일지</summary>
+    public bool ShowSettingsPreview { get; set; } = true;
+
+    /// <summary>어느 번역기로 번역했는지 결과 창 오른쪽 아래에 보일지</summary>
+    public bool ShowEngine { get; set; } = true;
+
     /// <summary>결과 창 가로와 원문·번역 칸 세로의 최소 크기(100% 배율 기준 픽셀). 작게 쓰고 싶은 경우를 위해 낮게 둔다</summary>
     public const int MinWidth = 120;
     public const int MinPaneHeight = 20;
@@ -174,6 +193,9 @@ internal sealed class AppConfig
     public void Normalize()
     {
         if (!ShowOriginal && !ShowTranslated) ShowTranslated = true;
+        TranslateOrder = Translator.CleanOrder(TranslateOrder);
+        GeminiApiKey = (GeminiApiKey ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(GeminiModel)) GeminiModel = Translator.DefaultGeminiModel;
         AutoCloseSeconds = Math.Clamp(AutoCloseSeconds, 0, 600);
         OriginalFontSize = Math.Clamp(OriginalFontSize, 6, 40);
         TranslatedFontSize = Math.Clamp(TranslatedFontSize, 6, 40);
@@ -508,6 +530,15 @@ internal static class ShotTest
             Directory.CreateDirectory(directory);
             var config = new AppConfig();
 
+            // 미리보기를 숨긴 설정 창(창이 메뉴·항목 너비로 줄어드는지 확인)
+            var narrowConfig = new AppConfig { ShowSettingsPreview = false };
+            using (var settings = new SettingsForm(narrowConfig, _ => true) { Opacity = 0, StartPosition = FormStartPosition.Manual, Location = new Point(0, 0) })
+            {
+                settings.Show();
+                Application.DoEvents();
+                Save(settings, Path.Combine(directory, "settings-no-preview.png"));
+            }
+
             using (var settings = new SettingsForm(config, _ => true) { Opacity = 0, StartPosition = FormStartPosition.Manual, Location = new Point(0, 0) })
             {
                 settings.Show();
@@ -721,12 +752,21 @@ internal static class SelfTest
 
             var config = new AppConfig();
             // UI 스레드 동기화 컨텍스트와 얽히지 않게 작업 스레드에서 돌린다
-            var (ocr, translated) = Task.Run(async () =>
+            OcrOutput ocr = Task.Run(() => OcrService.RecognizeAsync(bmp, [])).GetAwaiter().GetResult();
+            // 번역 요청은 여기 한 번만 보낸다(점검을 여러 번 돌려도 번역 서버 사용량 제한에 걸리지 않게)
+            string translatedLine;
+            bool translateOk = true;
+            try
             {
-                var o = await OcrService.RecognizeAsync(bmp, []);
-                var t = await Translator.TranslateAsync(o.Text, config.SourceLang, config.TargetLang, config.AltTargetLang);
-                return (o, t);
-            }).GetAwaiter().GetResult();
+                var options = TranslateOptions.From(config);
+                var t = Task.Run(() => Translator.TranslateAsync(ocr.Text, config.SourceLang, config.TargetLang, config.AltTargetLang, options)).GetAwaiter().GetResult();
+                translatedLine = $"번역기: {Translator.EngineName(t.Engine)}\r\n감지 언어: {t.SourceLang}\r\n번역: {t.Text}";
+            }
+            catch (Exception ex)
+            {
+                translateOk = false;
+                translatedLine = "번역 실패: " + ex.Message;
+            }
             UpdateResult update = Task.Run(UpdateService.CheckAsync).GetAwaiter().GetResult();
 
             // 한글 그림은 한국어 엔진이, 영문 그림은 영어 엔진이 골라지는지(자동 감지) 확인한다
@@ -761,14 +801,7 @@ internal static class SelfTest
                     g.DrawString(text, font, Brushes.Black, 20, 20);
                 }
                 OcrOutput found = Task.Run(() => OcrService.RecognizeAsync(image, [])).GetAwaiter().GetResult();
-                // 번역기의 언어 자동 감지까지 맞는지 본다
-                string translatedSample = "";
-                if (found.Text.Length > 0)
-                {
-                    var auto = Task.Run(() => Translator.TranslateAsync(found.Text, "auto", config.TargetLang, null)).GetAwaiter().GetResult();
-                    translatedSample = $" ⇒ (번역기 감지 {auto.SourceLang}) {auto.Text}";
-                }
-                detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}{translatedSample}");
+                detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}");
             }
 
             File.WriteAllText(outputPath,
@@ -776,8 +809,8 @@ internal static class SelfTest
                 $"읽을 수 있는 언어: {string.Join(", ", OcrService.InstalledLanguageNames())}\r\n" +
                 $"한글 그림 → 엔진 {koreanOcr.Language}: {koreanOcr.Text}\r\n" +
                 string.Join("\r\n", detectLines) + "\r\n" +
-                $"OCR 언어: {ocr.Language}\r\nOCR 결과: {ocr.Text}\r\n감지 언어: {translated.SourceLang}\r\n번역: {translated.Text}\r\n");
-            return 0;
+                $"OCR 언어: {ocr.Language}\r\nOCR 결과: {ocr.Text}\r\n{translatedLine}\r\n");
+            return translateOk ? 0 : 2;   // 2 = 번역만 실패(글자 인식 등 나머지는 통과)
         }
         catch (Exception ex)
         {

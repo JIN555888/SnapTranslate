@@ -8,6 +8,16 @@ namespace SnapTranslate;
 /// </summary>
 internal sealed class SettingsForm : Form
 {
+    private static readonly LangItem[] Engines =
+    [
+        new(Translator.Google, "Google 번역"),
+        new(Translator.MyMemory, "MyMemory"),
+        new(Translator.Gemini, "Gemini (AI, API 키 필요)"),
+    ];
+
+    // 2·3순위에서 고르는 "이 순위는 쓰지 않음"
+    private static readonly LangItem NoEngine = new("", "사용 안 함");
+
     private static readonly LangItem[] PositionModes =
     [
         new("Selection", "선택한 영역 근처"),
@@ -39,6 +49,8 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _keepFocus;
     private readonly CheckBox _startupNotice;
     private readonly Label _ocrInstalled;   // "읽을 수 있는 언어" 표시
+    private readonly ComboBox[] _engines;    // 번역기 우선순위(1·2·3순위)
+    private readonly TextBox _geminiKey;     // Gemini API 키(가려서 표시)
     private readonly CheckBox _checkUpdate;
     private readonly Label _updateStatus;
 
@@ -65,6 +77,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _showCaptions;
     private readonly CheckBox _showOriginal;
     private readonly CheckBox _showTranslated;
+    private readonly CheckBox _showEngine;
 
     private static readonly Color NavColor = Color.FromArgb(23, 24, 28);
     private static readonly Color SeparatorColor = Color.FromArgb(64, 67, 78);
@@ -72,13 +85,16 @@ internal sealed class SettingsForm : Form
     // 왼쪽 분류 메뉴와 가운데 항목 면
     private readonly Panel _navPanel = new() { Dock = DockStyle.Left, Width = 150, BackColor = NavColor, Padding = new Padding(8, 14, 8, 8) };
     private readonly FlowLayoutPanel _nav = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = NavColor };
-    private readonly Panel _content = new() { Dock = DockStyle.Left, Width = 510, Padding = new Padding(10, 10, 10, 0) };
+    private readonly Panel _content = new() { Dock = DockStyle.Left, Width = 530, Padding = new Padding(10, 10, 10, 0) };
     private readonly List<Panel> _pages = [];
     private readonly List<Button> _navButtons = [];
     private int _selectedPage;
 
     private readonly Label _message;
     private readonly Panel _previewHost;
+    private readonly Panel _previewArea;        // 미리보기 전체(제목 + 그림). 숨길 수 있다
+    private readonly Button _previewToggle;     // 미리보기 숨기기/보이기
+    private int _widthWithPreview;              // 미리보기를 보일 때의 창 안쪽 너비
     private ResultForm? _preview;
 
     public SettingsForm(AppConfig config, Func<string, bool> tryRegisterHotkey)
@@ -91,15 +107,17 @@ internal sealed class SettingsForm : Form
         Icon = Theme.LoadAppIcon(new Size(32, 32));
         Font = new Font(Theme.FontName, 10f);
         AutoScaleMode = AutoScaleMode.Dpi;
-        FormBorderStyle = FormBorderStyle.Sizable;
+        // 크기는 고정한다(늘려도 쓸모가 없다). 미리보기를 숨기거나 보일 때만 프로그램이 너비를 바꾼다
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+        MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
-        ClientSize = new Size(1290, 600);
-        MinimumSize = new Size(700, 400);
+        ClientSize = new Size(1310, 600);
+        MinimumSize = new Size(600, 400);
 
         // ---- 동작 ----
         _hotkey = new TextBox
@@ -132,6 +150,23 @@ internal sealed class SettingsForm : Form
         _closeOnEsc = CreateCheck("Esc 키로 창 닫기");
         _keepFocus = CreateCheck("쓰던 프로그램의 포커스 유지 (게임 권장)");
         _startupNotice = CreateCheck("시작할 때 Windows 알림 표시");
+
+        // ---- 번역기 ----
+        _engines = new ComboBox[Engines.Length];
+        for (int i = 0; i < _engines.Length; i++)
+        {
+            _engines[i] = CreateCombo();
+            _engines[i].Items.AddRange(Engines);
+            if (i > 0) _engines[i].Items.Add(NoEngine);   // 1순위는 반드시 고른다
+        }
+        _geminiKey = new TextBox
+        {
+            BackColor = Theme.Field,
+            ForeColor = Theme.Text,
+            BorderStyle = BorderStyle.FixedSingle,
+            Width = 300,
+            UseSystemPasswordChar = true,   // 화면을 공유하거나 찍을 때 키가 보이지 않게 가린다
+        };
 
         // ---- 크기 ----
         _opacity = new ValueSlider(30, 100, 1, "%", Theme.Card);
@@ -167,6 +202,7 @@ internal sealed class SettingsForm : Form
         _showCaptions = CreateCheck("칸 제목(원문/번역)");
         _showOriginal = CreateCheck("원문 칸");
         _showTranslated = CreateCheck("번역 칸");
+        _showEngine = CreateCheck("번역기 이름 (오른쪽 아래)");
 
         // 왼쪽 메뉴에서 분류를 고르면 가운데에 그 분류의 항목만 보인다
         TableLayoutPanel grid = NewPage("동작", "단축키, 언어, 창이 뜨는 자리, 자동 닫힘");
@@ -176,6 +212,7 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "원문 언어", _source);
         AddHint(grid, "번역할 화면의 언어. 보통 \"자동 감지\"로 두세요");
         _ocrInstalled = InfoLabel(string.Join(", ", OcrService.InstalledLanguageNames()));
+        _ocrInstalled.MaximumSize = new Size(255, 0);   // 언어가 많으면 잘리지 않게 여러 줄로 넘긴다
         var installOcr = new Button { Text = "언어 추가 설치…" };
         Theme.StyleButton(installOcr, false);
         installOcr.Margin = new Padding(3, 4, 0, 4);
@@ -204,6 +241,26 @@ internal sealed class SettingsForm : Form
         AddSeparator(grid);
         AddRow(grid, "알림", _startupNotice);
         AddHint(grid, "단축키 등록 실패 같은 경고는 꺼도 표시됩니다");
+
+        grid = NewPage("번역기", "번역에 쓸 서비스와 우선순위");
+        for (int i = 0; i < _engines.Length; i++) AddRow(grid, $"{i + 1}순위", _engines[i]);
+        AddHint(grid, "1순위부터 쓰고, 실패하면 다음 순위로 넘어갑니다");
+        AddHint(grid, "한 번역기만 쓰려면 2·3순위를 \"사용 안 함\"으로 두세요");
+        AddHint(grid, "같은 번역기를 두 번 고르면 뒤의 것은 무시됩니다");
+        AddSeparator(grid);
+        AddHint(grid, "Google 번역: 키 없이 사용. 많이 쓰면 잠시 막힐 수 있음");
+        AddHint(grid, "MyMemory: 키 없이 사용. 하루 약 5,000자까지");
+        AddHint(grid, "Gemini: AI 번역. 문맥·게임 용어에 강함. 무료 API 키 필요");
+        AddHint(grid, "Gemini 응답: 보통 1~3초, 붐비면 최대 30초");
+        AddHint(grid, "인식한 글자는 번역한 서비스로 전송됩니다");
+        AddSeparator(grid);
+        AddRow(grid, "Gemini API 키", _geminiKey);
+        AddRow(grid, "", LinkButton("키 발급 페이지 열기", Translator.GeminiKeyUrl, false));
+        AddHint(grid, "1. 단추를 눌러 Google 계정으로 로그인");
+        AddHint(grid, "2. \"Create API key\" (API 키 만들기)를 누름");
+        AddHint(grid, "3. 만들어진 키를 복사해 위 칸에 붙여 넣고 저장");
+        AddHint(grid, "무료 등급에는 하루 사용량 한도가 있습니다");
+        AddHint(grid, "키는 이 PC 의 config.json 에만 저장됩니다");
 
         grid = NewPage("크기", "결과 창의 불투명도와 가로·세로 크기");
         AddRow(grid, "불투명도", _opacity);
@@ -241,6 +298,7 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "", _showLanguageRow);
         AddRow(grid, "", _showBottomBar);
         AddRow(grid, "", _showCaptions);
+        AddRow(grid, "", _showEngine);
         AddHint(grid, "숨긴 뒤에는 결과 창 우클릭 메뉴로 다시 켤 수 있습니다");
 
         // ---- 정보 ----
@@ -259,7 +317,7 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "저작권", InfoLabel(AppInfo.Copyright));
         AddRow(grid, "라이선스", InfoLabel(AppInfo.License));
         AddRow(grid, "글자 인식", InfoLabel("Windows 내장 OCR (PC 안에서 처리)"));
-        AddRow(grid, "번역", InfoLabel("Google 번역 (인식한 글자가 전송됨)"));
+        AddRow(grid, "번역", InfoLabel("Google 번역 · MyMemory · Gemini 중 선택 (인식한 글자가 전송됨)"));
         AddRow(grid, "오픈소스", InfoLabel(".NET 9, Windows Forms, C#/WinRT (MIT)"));
         AddSeparator(grid);
         // 주소를 글자로 보이지 않고 단추로 연다
@@ -304,9 +362,9 @@ internal sealed class SettingsForm : Form
         };
         _previewHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(16, 16, 18) };
         Theme.DarkControl(_previewHost);
-        var previewArea = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 8, 0) };
-        previewArea.Controls.Add(_previewHost);
-        previewArea.Controls.Add(previewTitle);
+        _previewArea = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 8, 0) };
+        _previewArea.Controls.Add(_previewHost);
+        _previewArea.Controls.Add(previewTitle);
 
         // ---- 아래: 안내 문구와 버튼 ----
         _message = new Label { AutoSize = true, ForeColor = Theme.Danger, Margin = new Padding(3, 8, 12, 0) };
@@ -321,9 +379,13 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(save);
         buttons.Controls.Add(_message);
+        _previewToggle = new Button { Text = "미리보기 숨기기" };
+        Theme.StyleButton(_previewToggle, false);
+        _previewToggle.Click += (_, _) => TogglePreview();
+        buttons.Controls.Add(_previewToggle);
 
         // Dock 은 나중에 넣은 컨트롤부터 자리를 잡는다: 아래 버튼 → 왼쪽 메뉴 → 항목 → 나머지를 미리보기가 채운다
-        Controls.Add(previewArea);
+        Controls.Add(_previewArea);
         Controls.Add(_content);
         Controls.Add(_navPanel);
         Controls.Add(buttons);
@@ -350,6 +412,29 @@ internal sealed class SettingsForm : Form
         _preview.SizeChanged += (_, _) => CenterPreview();
         _previewHost.SizeChanged += (_, _) => CenterPreview();
         CenterPreview();
+        _widthWithPreview = ClientSize.Width;
+        if (!_config.ShowSettingsPreview) SetPreviewVisible(false);
+    }
+
+    /// <summary>미리보기를 숨기거나 보이고, 그 선택을 바로 저장한다(다음에 설정 창을 열 때도 유지)</summary>
+    private void TogglePreview()
+    {
+        bool show = !_previewArea.Visible;
+        SetPreviewVisible(show);
+        _config.ShowSettingsPreview = _draft.ShowSettingsPreview = show;
+        try { _config.Save(); }
+        catch (Exception ex) { _message.Text = "config.json 저장 실패: " + ex.Message; }
+    }
+
+    /// <summary>미리보기를 숨기면 창을 메뉴·항목 너비로 줄이고, 보이면 원래 너비로 되돌린다</summary>
+    private void SetPreviewVisible(bool show)
+    {
+        if (_previewArea.Visible == show) return;
+        if (!show) _widthWithPreview = ClientSize.Width;
+        _previewArea.Visible = show;
+        _previewToggle.Text = show ? "미리보기 숨기기" : "미리보기 보이기";
+        int narrow = _navPanel.Width + _content.Width;
+        ClientSize = new Size(show ? Math.Max(_widthWithPreview, narrow + 300) : narrow, ClientSize.Height);
     }
 
     /// <summary>미리보기를 미리보기 영역 한가운데에 놓는다. 영역보다 크면 왼쪽 위에 붙이고 스크롤한다</summary>
@@ -387,6 +472,10 @@ internal sealed class SettingsForm : Form
             _keepFocus.Checked = c.KeepFocusOnApp;
             _checkUpdate.Checked = c.CheckUpdateOnStart;
             _startupNotice.Checked = c.ShowStartupNotice;
+            var order = Translator.CleanOrder(c.TranslateOrder);
+            for (int i = 0; i < _engines.Length; i++)
+                _engines[i].SelectedItem = i < order.Count ? Engines.First(e => e.Code == order[i]) : NoEngine;
+            _geminiKey.Text = c.GeminiApiKey;
 
             _opacity.Value = c.Opacity;
             _width.Value = c.WindowWidth;
@@ -412,6 +501,7 @@ internal sealed class SettingsForm : Form
             _showCaptions.Checked = c.ShowCaptions;
             _showOriginal.Checked = c.ShowOriginal;
             _showTranslated.Checked = c.ShowTranslated;
+            _showEngine.Checked = c.ShowEngine;
             UpdatePositionInputs();
         }
         finally
@@ -436,6 +526,8 @@ internal sealed class SettingsForm : Form
         c.KeepFocusOnApp = _keepFocus.Checked;
         c.CheckUpdateOnStart = _checkUpdate.Checked;
         c.ShowStartupNotice = _startupNotice.Checked;
+        c.TranslateOrder = Translator.CleanOrder(_engines.Select(combo => (combo.SelectedItem as LangItem)?.Code ?? ""));
+        c.GeminiApiKey = _geminiKey.Text.Trim();
 
         c.Opacity = (int)_opacity.Value;
         c.WindowWidth = (int)_width.Value;
@@ -460,6 +552,7 @@ internal sealed class SettingsForm : Form
         c.ShowCaptions = _showCaptions.Checked;
         c.ShowOriginal = _showOriginal.Checked;
         c.ShowTranslated = _showTranslated.Checked;
+        c.ShowEngine = _showEngine.Checked;
     }
 
     /// <summary>값이 바뀔 때마다 미리보기를 다시 그리도록 모든 입력에 연결한다</summary>
@@ -470,7 +563,7 @@ internal sealed class SettingsForm : Form
         _autoClose.ValueChanged += (_, _) => OnChanged();
         foreach (var slider in new[] { _opacity, _width, _originalHeight, _translatedHeight, _originalFontSize, _translatedFontSize })
             slider.ValueChanged += (_, _) => OnChanged();
-        foreach (var check in new[] { _autoCopy, _reuseWindow, _closeOnEsc, _showTitleBar, _showLanguageRow, _showBottomBar, _showCaptions, _showOriginal, _showTranslated })
+        foreach (var check in new[] { _autoCopy, _reuseWindow, _closeOnEsc, _showTitleBar, _showLanguageRow, _showBottomBar, _showCaptions, _showOriginal, _showTranslated, _showEngine })
             check.CheckedChanged += (_, _) => OnChanged();
         foreach (var color in new[] { _originalColor, _translatedColor, _backgroundColor, _cardColor, _accentColor, _labelColor, _fieldColor })
             color.BackColorChanged += (_, _) => OnChanged();
@@ -603,7 +696,8 @@ internal sealed class SettingsForm : Form
     /// <summary>분류 하나(왼쪽 메뉴 단추 + 가운데 항목 면)를 만들고, 항목을 넣을 표를 돌려준다</summary>
     private TableLayoutPanel NewPage(string title, string description)
     {
-        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2 };
+        // 아래·오른쪽 여백은 표 안쪽에 둔다(스크롤되는 판의 여백은 끝까지 내렸을 때 적용되지 않는다)
+        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, Padding = new Padding(0, 0, 14, 28) };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         AddWide(grid, new Label { Text = title, AutoSize = true, ForeColor = Theme.Text, Font = new Font(Theme.FontName, 13f, FontStyle.Bold), Margin = new Padding(3, 0, 3, 2) });
