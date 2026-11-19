@@ -48,6 +48,11 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _closeOnEsc;
     private readonly CheckBox _keepFocus;
     private readonly CheckBox _startupNotice;
+    private readonly CheckBox _autostart;     // Windows 시작 시 자동 실행(레지스트리에 등록)
+    private readonly CheckBox _saveHistory;   // 번역 기록 저장
+    private readonly TextBox _glossary;       // 용어집(한 줄에 "원문=번역")
+    private readonly CheckBox _debugLog;      // 진단 기록 남기기
+    private readonly Label _logStatus;        // 진단 기록 파일 상태
     private readonly Label _ocrInstalled;   // "읽을 수 있는 언어" 표시
     private readonly ComboBox[] _engines;    // 번역기 우선순위(1·2·3순위)
     private readonly TextBox _geminiKey;     // Gemini API 키(가려서 표시)
@@ -150,6 +155,23 @@ internal sealed class SettingsForm : Form
         _closeOnEsc = CreateCheck("Esc 키로 창 닫기");
         _keepFocus = CreateCheck("쓰던 프로그램의 포커스 유지 (게임 권장)");
         _startupNotice = CreateCheck("시작할 때 Windows 알림 표시");
+        _autostart = CreateCheck("Windows 시작 시 자동 실행");
+        _saveHistory = CreateCheck("번역 기록 저장 (최근 200건)");
+        _glossary = new TextBox
+        {
+            Multiline = true,
+            AcceptsReturn = true,
+            ScrollBars = ScrollBars.Vertical,
+            WordWrap = false,
+            BackColor = Theme.Field,
+            ForeColor = Theme.Text,
+            BorderStyle = BorderStyle.FixedSingle,
+            Size = new Size(430, 250),
+            Margin = new Padding(3, 8, 3, 6),
+        };
+        Theme.DarkControl(_glossary);
+        _debugLog = CreateCheck("진단 기록 남기기 (문제 신고용)");
+        _logStatus = new Label { AutoSize = true, ForeColor = Theme.SubText, Margin = new Padding(3, 4, 3, 4) };
 
         // ---- 번역기 ----
         _engines = new ComboBox[Engines.Length];
@@ -238,9 +260,14 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "자동 닫힘(초)", _autoClose);
         AddHint(grid, "0 = 닫지 않음. 마우스가 창 위에 있으면 안 닫힘");
         AddRow(grid, "", _autoCopy);
+        AddRow(grid, "", _saveHistory);
+        AddHint(grid, "켜면 원문·번역문이 이 PC 의 history.json 에 남습니다");
+        AddHint(grid, "트레이 우클릭 → 번역 기록… 에서 봅니다");
         AddSeparator(grid);
         AddRow(grid, "알림", _startupNotice);
         AddHint(grid, "단축키 등록 실패 같은 경고는 꺼도 표시됩니다");
+        AddRow(grid, "시작", _autostart);
+        AddHint(grid, "프로그램 폴더를 옮기면 다시 체크해야 합니다");
 
         grid = NewPage("번역기", "번역에 쓸 서비스와 우선순위");
         for (int i = 0; i < _engines.Length; i++) AddRow(grid, $"{i + 1}순위", _engines[i]);
@@ -261,6 +288,12 @@ internal sealed class SettingsForm : Form
         AddHint(grid, "3. 만들어진 키를 복사해 위 칸에 붙여 넣고 저장");
         AddHint(grid, "무료 등급에는 하루 사용량 한도가 있습니다");
         AddHint(grid, "키는 이 PC 의 config.json 에만 저장됩니다");
+
+        grid = NewPage("용어집", "정해 둔 낱말은 항상 같은 말로 번역");
+        AddWide(grid, new Label { Text = "한 줄에 하나씩  원문=번역  으로 적습니다", AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(3, 4, 3, 0) });
+        AddWide(grid, _glossary);
+        AddWide(grid, new Label { Text = "예)  Aerith=에어리스\r\n      Mana Potion=마나 물약", AutoSize = true, ForeColor = Theme.SubText, Font = new Font(Theme.FontName, 8.5f), Margin = new Padding(3, 0, 3, 6) });
+        AddWide(grid, new Label { Text = "게임 고유 명사, 캐릭터 이름처럼 번역이 매번 달라지는 낱말에 씁니다.\r\n대소문자는 구분하지 않습니다. Gemini 에서 가장 정확하게 적용됩니다.", AutoSize = true, ForeColor = Theme.SubText, Font = new Font(Theme.FontName, 8.5f), Margin = new Padding(3, 0, 3, 4) });
 
         grid = NewPage("크기", "결과 창의 불투명도와 가로·세로 크기");
         AddRow(grid, "불투명도", _opacity);
@@ -317,7 +350,7 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "저작권", InfoLabel(AppInfo.Copyright));
         AddRow(grid, "라이선스", InfoLabel(AppInfo.License));
         AddRow(grid, "글자 인식", InfoLabel("Windows 내장 OCR (PC 안에서 처리)"));
-        AddRow(grid, "번역", InfoLabel("Google 번역 · MyMemory · Gemini 중 선택 (인식한 글자가 전송됨)"));
+        AddRow(grid, "번역", InfoLabel("Google 번역 · MyMemory · Gemini (글자가 전송됨)"));
         AddRow(grid, "오픈소스", InfoLabel(".NET 9, Windows Forms, C#/WinRT (MIT)"));
         AddSeparator(grid);
         // 주소를 글자로 보이지 않고 단추로 연다
@@ -345,6 +378,28 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "", checkNow);
         AddRow(grid, "", _updateStatus);
         if (AppInfo.Repo.Length == 0) _updateStatus.Text = "업데이트 주소가 아직 설정되지 않았습니다.";
+
+        // 문제 신고용 진단 기록. 켜고 끄는 것은 저장을 누르지 않아도 바로 적용된다(켜고 → 문제 재현 → 파일 전달)
+        AddSeparator(grid);
+        var openLog = new Button { Text = "기록 파일 위치 열기" };
+        var copyLog = new Button { Text = "기록 내용 복사" };
+        var clearLog = new Button { Text = "기록 지우기" };
+        foreach (var button in new[] { openLog, copyLog, clearLog })
+        {
+            Theme.StyleButton(button, false);
+            button.Margin = new Padding(3, 4, 6, 4);
+        }
+        openLog.Click += (_, _) => OpenLogLocation();
+        copyLog.Click += (_, _) => CopyLog();
+        clearLog.Click += (_, _) => { DebugLog.Clear(_config); UpdateLogStatus(); };
+        _debugLog.CheckedChanged += (_, _) => OnDebugLogToggled();
+        AddRow(grid, "문제 신고", _debugLog);
+        AddHint(grid, "1. 체크  2. 문제를 다시 일으킴  3. 아래 단추로 파일을 보냄");
+        AddHint(grid, "번역한 글 내용·화면 그림·API 키는 기록하지 않습니다");
+        AddHint(grid, "꺼 두면 기록하지 않습니다 (프로그램이 죽는 오류만 남김)");
+        AddRow(grid, "", Row(openLog, copyLog));
+        AddRow(grid, "", clearLog);
+        AddRow(grid, "", _logStatus);
 
         _navPanel.Controls.Add(_nav);
         SelectPage(0);
@@ -416,6 +471,62 @@ internal sealed class SettingsForm : Form
         if (!_config.ShowSettingsPreview) SetPreviewVisible(false);
     }
 
+    /// <summary>진단 기록을 켜거나 끈다. 저장 단추와 관계없이 바로 적용하고 설정 파일에도 적는다</summary>
+    private void OnDebugLogToggled()
+    {
+        if (_loading) return;
+        bool on = _debugLog.Checked;
+        _config.DebugLog = _draft.DebugLog = on;
+        DebugLog.SetEnabled(on, _config);
+        try { _config.Save(); }
+        catch (Exception ex) { _message.Text = "config.json 저장 실패: " + ex.Message; }
+        UpdateLogStatus();
+    }
+
+    private void UpdateLogStatus()
+    {
+        string state = DebugLog.Enabled ? "기록 중" : "꺼짐";
+        string file = DebugLog.Exists
+            ? $"{DebugLog.FileName} ({new FileInfo(DebugLog.FilePath).Length / 1024.0:0.#} KB)"
+            : "기록 파일 없음";
+        _logStatus.Text = $"{state} · {file}";
+    }
+
+    /// <summary>탐색기를 열어 기록 파일을 고른 채로 보여 준다(그대로 끌어다 보내면 된다)</summary>
+    private void OpenLogLocation()
+    {
+        try
+        {
+            string arguments = DebugLog.Exists ? $"/select,\"{DebugLog.FilePath}\"" : $"\"{AppContext.BaseDirectory}\"";
+            System.Diagnostics.Process.Start("explorer.exe", arguments);
+            if (!DebugLog.Exists) _logStatus.Text = "아직 기록 파일이 없습니다. 체크한 뒤 문제를 다시 일으켜 보세요.";
+        }
+        catch (Exception ex)
+        {
+            _logStatus.Text = "폴더를 열지 못했습니다: " + ex.Message;
+        }
+    }
+
+    /// <summary>기록 내용을 클립보드에 복사한다(댓글·메일에 바로 붙여 넣을 수 있게)</summary>
+    private void CopyLog()
+    {
+        string text = DebugLog.ReadAll();
+        if (text.Length == 0)
+        {
+            _logStatus.Text = "복사할 기록이 없습니다.";
+            return;
+        }
+        try
+        {
+            Clipboard.SetText(text);
+            _logStatus.Text = $"기록을 복사했습니다 ({text.Length:N0}자). 붙여 넣어 보내 주세요.";
+        }
+        catch (Exception ex)
+        {
+            _logStatus.Text = "복사 실패: " + ex.Message;
+        }
+    }
+
     /// <summary>미리보기를 숨기거나 보이고, 그 선택을 바로 저장한다(다음에 설정 창을 열 때도 유지)</summary>
     private void TogglePreview()
     {
@@ -472,6 +583,11 @@ internal sealed class SettingsForm : Form
             _keepFocus.Checked = c.KeepFocusOnApp;
             _checkUpdate.Checked = c.CheckUpdateOnStart;
             _startupNotice.Checked = c.ShowStartupNotice;
+            _autostart.Checked = Autostart.IsEnabled();   // 설정 파일이 아니라 실제 등록 상태를 보인다
+            _saveHistory.Checked = c.SaveHistory;
+            _glossary.Text = string.Join("\r\n", c.Glossary);
+            _debugLog.Checked = c.DebugLog;
+            UpdateLogStatus();
             var order = Translator.NormalizeSlots(c.TranslateOrder);
             for (int i = 0; i < _engines.Length; i++)
                 _engines[i].SelectedItem = Engines.FirstOrDefault(e => e.Code == order[i]) ?? NoEngine;
@@ -526,6 +642,9 @@ internal sealed class SettingsForm : Form
         c.KeepFocusOnApp = _keepFocus.Checked;
         c.CheckUpdateOnStart = _checkUpdate.Checked;
         c.ShowStartupNotice = _startupNotice.Checked;
+        c.SaveHistory = _saveHistory.Checked;
+        c.Glossary = _glossary.Lines.Select(line => line.Trim()).Where(line => line.Length > 0).ToList();
+        c.DebugLog = _debugLog.Checked;
         c.TranslateOrder = Translator.NormalizeSlots(_engines.Select(combo => (combo.SelectedItem as LangItem)?.Code ?? ""));
         c.GeminiApiKey = _geminiKey.Text.Trim();
 
@@ -757,6 +876,9 @@ internal sealed class SettingsForm : Form
 
     public int PageCount => _pages.Count;
 
+    /// <summary>지금 보이는 페이지를 맨 아래까지 내린다(모양 점검용)</summary>
+    public void ScrollPageToEnd() => _pages[_selectedPage].AutoScrollPosition = new Point(0, 100000);
+
     /// <summary>한 줄에 컨트롤 여러 개를 나란히 놓는다</summary>
     private static FlowLayoutPanel Row(params Control[] controls)
     {
@@ -842,6 +964,17 @@ internal sealed class SettingsForm : Form
         {
             _message.Text = $"{hotkey} 는 등록할 수 없습니다. 다른 조합을 고르세요.";
             return;
+        }
+
+        // 자동 실행은 실제 등록 상태와 다를 때만 바꾼다
+        if (_autostart.Checked != Autostart.IsEnabled())
+        {
+            string? failed = Autostart.Set(_autostart.Checked);
+            if (failed != null)
+            {
+                _message.Text = "자동 실행 설정 실패: " + failed;
+                return;
+            }
         }
 
         _config.Hotkey = hotkey;

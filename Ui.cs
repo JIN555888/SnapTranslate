@@ -506,3 +506,50 @@ internal sealed class SlimSlider : Control
         Committed?.Invoke(this, EventArgs.Empty);
     }
 }
+
+/// <summary>진행 중임을 알리는 점 세 개. 지금 차례인 점만 강조색으로 칠한다</summary>
+internal sealed class BusyDots : Control
+{
+    private int _frame;
+
+    public BusyDots()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        TabStop = false;
+    }
+
+    /// <summary>강조할 점(0~2)</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public int Frame
+    {
+        get => _frame;
+        set { _frame = value; Invalidate(); }
+    }
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Color ActiveColor { get; set; } = Theme.Accent;
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Color IdleColor { get; set; } = Theme.Field;
+
+    /// <summary>글자 높이에 맞춘 크기(점 지름은 높이의 40%)</summary>
+    public static Size SizeFor(int textHeight)
+    {
+        int dot = Math.Max(5, (int)(textHeight * 0.4));
+        return new Size(dot * 3 + (dot / 2 + 2) * 2 + 2, textHeight);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.Clear(BackColor);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        int dot = Math.Max(5, (int)(Height * 0.4));
+        int gap = dot / 2 + 2;
+        int y = (Height - dot) / 2 + 1;
+        for (int i = 0; i < 3; i++)
+        {
+            using var brush = new SolidBrush(i == _frame ? ActiveColor : IdleColor);
+            e.Graphics.FillEllipse(brush, 1 + i * (dot + gap), y, dot, dot);
+        }
+    }
+}
