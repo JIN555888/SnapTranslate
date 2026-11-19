@@ -1,0 +1,114 @@
+# 배포 빌드: 태그(v1.2.3 같은)를 올리면 GitHub 에서 빌드하고, SignPath 키가 있으면 실행 파일에 서명한 뒤
+# 같은 이름의 릴리즈에 zip 두 개를 올린다. 릴리즈가 없으면 초안(draft)으로 만든다.
+# 손으로 돌리면(workflow_dispatch) 빌드와 서명만 하고 결과를 작업 산출물로 남긴다.
+name: 배포 빌드
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 릴리즈에 파일 올리기
+  actions: read     # SignPath 가 빌드 산출물을 가져가기
+
+jobs:
+  build:
+    # SignPath 오픈소스 서명은 GitHub 이 제공하는 실행기에서 빌드한 것만 받는다
+    runs-on: windows-latest
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: 버전 읽기
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$xml = Get-Content SnapTranslate.csproj -Encoding UTF8
+          $version = ($xml.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ } | Select-Object -First 1)
+          if ("${{ github.ref_type }}" -eq 'tag' -and "v$version" -ne "${{ github.ref_name }}") {
+            throw "태그(${{ github.ref_name }})와 csproj 버전(v$version)이 다릅니다."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: 빌드
+        shell: pwsh
+        run: ./tools/package.ps1 -Step Publish
+
+      # ---------- 서명 (SIGNPATH_API_TOKEN 비밀 값이 있을 때만) ----------
+      - name: 서명할 실행 파일 모으기
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          New-Item -ItemType Directory -Force unsigned/framework, unsigned/self-contained | Out-Null
+          Copy-Item "release/stage/SnapTranslate-$v-win-x64/SnapTranslate.exe" unsigned/framework/
+          Copy-Item "release/stage/SnapTranslate-$v-win-x64-self-contained/SnapTranslate.exe" unsigned/self-contained/
+
+      - name: 서명 전 파일 올리기
+        id: upload-unsigned
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned
+          path: unsigned
+
+      - name: SignPath 서명 요청
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          parameters: |
+            version: "${{ steps.version.outputs.version }}"
+          wait-for-completion: true
+          # 서명마다 사람이 승인해야 하므로 넉넉히 기다린다
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+
+      - name: 서명한 실행 파일 넣기
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          foreach ($pair in @(@('framework', "SnapTranslate-$v-win-x64"), @('self-contained', "SnapTranslate-$v-win-x64-self-contained"))) {
+            $exe = "signed/$($pair[0])/SnapTranslate.exe"
+            $sig = Get-AuthenticodeSignature $exe
+            if ($sig.Status -ne 'Valid') { throw "$exe 서명이 올바르지 않습니다: $($sig.Status)" }
+            Copy-Item $exe "release/stage/$($pair[1])/SnapTranslate.exe" -Force
+          }
+
+      # ---------- 압축과 배포 ----------
+      - name: 압축
+        shell: pwsh
+        run: ./tools/package.ps1 -Step Zip
+
+      - name: 빌드 결과 보관
+        uses: actions/upload-artifact@v7
+        with:
+          name: SnapTranslate-${{ steps.version.outputs.version }}
+          path: release/*.zip
+
+      - name: 릴리즈에 올리기
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $zips = (Get-ChildItem release/*.zip).FullName
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @zips --clobber
+          } else {
+            gh release create $tag @zips --draft --title "SnapTranslate ${{ steps.version.outputs.version }}" --notes "릴리즈 노트는 README 를 보세요."
+          }
