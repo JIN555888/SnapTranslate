@@ -157,6 +157,14 @@ internal sealed class AppConfig
     public string AccentColor { get; set; } = "#4F8CFF";       // 칸 제목·복사 버튼·슬라이더
     public string LabelColor { get; set; } = "#969BA8";        // 제목·상태 등 보조 글자
     public string FieldColor { get; set; } = "#363942";        // 언어 목록·버튼 배경
+    public string EngineBadgeColor { get; set; } = "#4F8CFF";  // 오른쪽 아래 번역기 이름 표시의 바탕
+    public string DragHandleColor { get; set; } = "#FFCC40";   // 왼쪽 위 창 이동 손잡이
+
+    /// <summary>번역기 이름 표시의 글자 크기(pt)</summary>
+    public double EngineBadgeFontSize { get; set; } = 8.5;
+
+    /// <summary>창 이동 손잡이의 지름(100% 배율 기준 픽셀)</summary>
+    public int DragHandleSize { get; set; } = 17;
 
     /// <summary>설정 창 미리보기용 사본을 만든다</summary>
     public AppConfig Clone() =>
@@ -179,6 +187,11 @@ internal sealed class AppConfig
         AccentColor = other.AccentColor;
         LabelColor = other.LabelColor;
         FieldColor = other.FieldColor;
+        EngineBadgeColor = other.EngineBadgeColor;
+        DragHandleColor = other.DragHandleColor;
+        EngineBadgeFontSize = other.EngineBadgeFontSize;
+        DragHandleSize = other.DragHandleSize;
+        ShowDragHandle = other.ShowDragHandle;
         ShowTitleBar = other.ShowTitleBar;
         ShowLanguageRow = other.ShowLanguageRow;
         ShowBottomBar = other.ShowBottomBar;
@@ -204,6 +217,9 @@ internal sealed class AppConfig
     /// <summary>어느 번역기로 번역했는지 결과 창 오른쪽 아래에 보일지</summary>
     public bool ShowEngine { get; set; } = true;
 
+    /// <summary>제목 줄을 숨겼을 때 왼쪽 위에 창 이동 손잡이를 보일지</summary>
+    public bool ShowDragHandle { get; set; } = true;
+
     /// <summary>결과 창 가로와 원문·번역 칸 세로의 최소 크기(100% 배율 기준 픽셀). 작게 쓰고 싶은 경우를 위해 낮게 둔다</summary>
     public const int MinWidth = 120;
     public const int MinPaneHeight = 20;
@@ -223,6 +239,8 @@ internal sealed class AppConfig
         WindowWidth = Math.Clamp(WindowWidth, MinWidth, 2000);
         OriginalHeight = Math.Clamp(OriginalHeight, MinPaneHeight, 1000);
         TranslatedHeight = Math.Clamp(TranslatedHeight, MinPaneHeight, 1200);
+        EngineBadgeFontSize = Math.Clamp(EngineBadgeFontSize, 6, 20);
+        DragHandleSize = Math.Clamp(DragHandleSize, 8, 40);
     }
 
     public void Save()

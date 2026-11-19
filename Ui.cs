@@ -572,9 +572,22 @@ internal sealed class DragDot : Control
         Size = new Size(22, 22);
     }
 
-    // 어두운 창에서도 밝은 창에서도 눈에 띄게 노랑으로 고정한다(마우스를 올리면 더 밝아진다)
-    private static readonly Color DotColor = Color.FromArgb(255, 204, 64);
-    private static readonly Color HoverColor = Color.FromArgb(255, 226, 130);
+    private Color _dotColor = Color.FromArgb(255, 204, 64);
+
+    /// <summary>손잡이 색(기본은 노랑). 마우스를 올리면 조금 더 밝게 그린다</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Color DotColor
+    {
+        get => _dotColor;
+        set { _dotColor = value; Invalidate(); }
+    }
+
+    /// <summary>원의 지름(픽셀)을 정한다. 누르는 자리는 그보다 조금 넉넉하게 잡는다</summary>
+    public void SetDotSize(int diameter)
+    {
+        var size = new Size(diameter + 5, diameter + 5);
+        if (Size != size) Size = size;
+    }
 
     protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hover = true; Invalidate(); }
     protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hover = false; Invalidate(); }
@@ -586,7 +599,7 @@ internal sealed class DragDot : Control
         // 누를 자리는 넉넉하게 두고, 그 안에 조금 작은 원을 그린다
         int size = Math.Min(Width, Height) - 5;
         var circle = new Rectangle((Width - size) / 2, (Height - size) / 2, size, size);
-        using var brush = new SolidBrush(_hover ? HoverColor : DotColor);
+        using var brush = new SolidBrush(_hover ? ControlPaint.Light(_dotColor, 0.6f) : _dotColor);
         e.Graphics.FillEllipse(brush, circle);
     }
 }

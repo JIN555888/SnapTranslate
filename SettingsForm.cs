@@ -75,6 +75,11 @@ internal sealed class SettingsForm : Form
     private readonly Button _accentColor;
     private readonly Button _labelColor;
     private readonly Button _fieldColor;
+    private readonly Button _badgeColor;          // 번역기 이름 표시 색
+    private readonly Button _handleColor;         // 창 이동 손잡이 색
+    private readonly ValueSlider _badgeFontSize;  // 번역기 이름 표시 글자 크기
+    private readonly ValueSlider _handleSize;     // 창 이동 손잡이 크기
+    private readonly CheckBox _showHandle;        // 창 이동 손잡이 표시
 
     private readonly CheckBox _showTitleBar;
     private readonly CheckBox _showLanguageRow;
@@ -204,6 +209,11 @@ internal sealed class SettingsForm : Form
         _accentColor = CreateColorButton();
         _labelColor = CreateColorButton();
         _fieldColor = CreateColorButton();
+        _badgeColor = CreateColorButton();
+        _handleColor = CreateColorButton();
+        _badgeFontSize = new ValueSlider(6, 20, 0.5m, " pt", Theme.Card);
+        _handleSize = new ValueSlider(8, 40, 1, " px", Theme.Card);
+        _showHandle = CreateCheck("창 이동 손잡이 (왼쪽 위)");
         var reset = new Button { Text = "기본 모양으로" };
         Theme.StyleButton(reset, false);
         reset.Margin = new Padding(3, 6, 3, 6);
@@ -312,6 +322,13 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "보조 글자(제목·상태)", _labelColor);
         AddRow(grid, "언어 목록·버튼 배경", _fieldColor);
         AddSeparator(grid);
+        AddRow(grid, "번역기 이름 표시", _badgeColor);
+        AddRow(grid, "번역기 이름 글자 크기", _badgeFontSize);
+        AddSeparator(grid);
+        AddRow(grid, "창 이동 손잡이", _handleColor);
+        AddRow(grid, "창 이동 손잡이 크기", _handleSize);
+        AddHint(grid, "손잡이는 제목 줄을 숨겼을 때 보입니다");
+        AddSeparator(grid);
         AddRow(grid, "크기·글자·색·표시 항목", reset);
 
         grid = NewPage("표시 항목", "결과 창에서 보일 부분");
@@ -324,6 +341,8 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "", _showBottomBar);
         AddRow(grid, "", _showCaptions);
         AddRow(grid, "", _showEngine);
+        AddRow(grid, "", _showHandle);
+        AddHint(grid, "손잡이는 제목 줄을 숨겼을 때만 보입니다");
         AddHint(grid, "숨긴 뒤에는 결과 창 우클릭 메뉴로 다시 켤 수 있습니다");
 
         // ---- 정보 ----
@@ -622,6 +641,10 @@ internal sealed class SettingsForm : Form
             _accentColor.BackColor = Theme.ParseColor(c.AccentColor, Theme.Accent);
             _labelColor.BackColor = Theme.ParseColor(c.LabelColor, Theme.SubText);
             _fieldColor.BackColor = Theme.ParseColor(c.FieldColor, Theme.Field);
+            _badgeColor.BackColor = Theme.ParseColor(c.EngineBadgeColor, Theme.Accent);
+            _handleColor.BackColor = Theme.ParseColor(c.DragHandleColor, Color.FromArgb(255, 204, 64));
+            _badgeFontSize.Value = (decimal)c.EngineBadgeFontSize;
+            _handleSize.Value = c.DragHandleSize;
 
             _showTitleBar.Checked = c.ShowTitleBar;
             _showLanguageRow.Checked = c.ShowLanguageRow;
@@ -630,6 +653,7 @@ internal sealed class SettingsForm : Form
             _showOriginal.Checked = c.ShowOriginal;
             _showTranslated.Checked = c.ShowTranslated;
             _showEngine.Checked = c.ShowEngine;
+            _showHandle.Checked = c.ShowDragHandle;
             UpdatePositionInputs();
         }
         finally
@@ -676,6 +700,10 @@ internal sealed class SettingsForm : Form
         c.AccentColor = Theme.ToHex(_accentColor.BackColor);
         c.LabelColor = Theme.ToHex(_labelColor.BackColor);
         c.FieldColor = Theme.ToHex(_fieldColor.BackColor);
+        c.EngineBadgeColor = Theme.ToHex(_badgeColor.BackColor);
+        c.DragHandleColor = Theme.ToHex(_handleColor.BackColor);
+        c.EngineBadgeFontSize = (double)_badgeFontSize.Value;
+        c.DragHandleSize = (int)_handleSize.Value;
 
         c.ShowTitleBar = _showTitleBar.Checked;
         c.ShowLanguageRow = _showLanguageRow.Checked;
@@ -684,6 +712,7 @@ internal sealed class SettingsForm : Form
         c.ShowOriginal = _showOriginal.Checked;
         c.ShowTranslated = _showTranslated.Checked;
         c.ShowEngine = _showEngine.Checked;
+        c.ShowDragHandle = _showHandle.Checked;
     }
 
     /// <summary>값이 바뀔 때마다 미리보기를 다시 그리도록 모든 입력에 연결한다</summary>
@@ -692,11 +721,11 @@ internal sealed class SettingsForm : Form
         foreach (var combo in new[] { _source, _target, _altTarget, _position, _fontName })
             combo.SelectedIndexChanged += (_, _) => OnChanged();
         _autoClose.ValueChanged += (_, _) => OnChanged();
-        foreach (var slider in new[] { _opacity, _width, _originalHeight, _translatedHeight, _originalFontSize, _translatedFontSize })
+        foreach (var slider in new[] { _opacity, _width, _originalHeight, _translatedHeight, _originalFontSize, _translatedFontSize, _badgeFontSize, _handleSize })
             slider.ValueChanged += (_, _) => OnChanged();
-        foreach (var check in new[] { _autoCopy, _reuseWindow, _closeOnEsc, _showTitleBar, _showLanguageRow, _showBottomBar, _showCaptions, _showOriginal, _showTranslated, _showEngine })
+        foreach (var check in new[] { _autoCopy, _reuseWindow, _closeOnEsc, _showTitleBar, _showLanguageRow, _showBottomBar, _showCaptions, _showOriginal, _showTranslated, _showEngine, _showHandle })
             check.CheckedChanged += (_, _) => OnChanged();
-        foreach (var color in new[] { _originalColor, _translatedColor, _backgroundColor, _cardColor, _accentColor, _labelColor, _fieldColor })
+        foreach (var color in new[] { _originalColor, _translatedColor, _backgroundColor, _cardColor, _accentColor, _labelColor, _fieldColor, _badgeColor, _handleColor })
             color.BackColorChanged += (_, _) => OnChanged();
     }
 

@@ -430,6 +430,7 @@ internal sealed class ResultForm : Form
         AddToggle("원문 칸 표시", () => _config.ShowOriginal, v => _config.ShowOriginal = v);
         AddToggle("번역 칸 표시", () => _config.ShowTranslated, v => _config.ShowTranslated = v);
         AddToggle("번역기 이름 표시", () => _config.ShowEngine, v => _config.ShowEngine = v);
+        AddToggle("창 이동 손잡이 표시", () => _config.ShowDragHandle, v => _config.ShowDragHandle = v);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("번역 복사", null, (_, _) => CopyTranslation());
         menu.Items.Add("설정…", null, (_, _) => openSettings());
@@ -629,8 +630,10 @@ internal sealed class ResultForm : Form
         _floatClose.Visible = !_config.ShowTitleBar;
         _floatClose.BackColor = back;   // 창 구석(바깥 여백) 위에 놓이므로 창 배경색에 맞춘다
         _floatClose.ForeColor = label;
-        _dragDot.Visible = !_config.ShowTitleBar;
+        _dragDot.Visible = !_config.ShowTitleBar && _config.ShowDragHandle;
         _dragDot.BackColor = back;
+        _dragDot.DotColor = Theme.ParseColor(_config.DragHandleColor, Color.FromArgb(255, 204, 64));
+        _dragDot.SetDotSize((int)Math.Round(_config.DragHandleSize * DeviceDpi / 96.0));
         PlaceFloatClose();
         _floatClose.BringToFront();
         if (_closeMenuItem != null) _closeMenuItem.Text = _config.CloseOnEsc ? "닫기 (Esc)" : "닫기";
@@ -650,8 +653,15 @@ internal sealed class ResultForm : Form
         _root.PerformLayout();
 
         // 번역기 이름은 한눈에 보이게 강조색 배지로 그린다. 칸 크기가 정해진 뒤에 자리를 잡는다
-        _engineLabel.BackColor = accent;
-        _engineLabel.ForeColor = Theme.ContrastText(accent);
+        Color badge = Theme.ParseColor(_config.EngineBadgeColor, accent);
+        _engineLabel.BackColor = badge;
+        _engineLabel.ForeColor = Theme.ContrastText(badge);
+        if (Math.Abs(_engineLabel.Font.SizeInPoints - (float)_config.EngineBadgeFontSize) > 0.01f)
+        {
+            Font old = _engineLabel.Font;
+            _engineLabel.Font = new Font(Theme.FontName, (float)_config.EngineBadgeFontSize, FontStyle.Bold);
+            old.Dispose();
+        }
         PlaceEngineLabel();
     }
 
