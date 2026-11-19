@@ -692,10 +692,35 @@ internal static class SelfTest
             }
             OcrOutput koreanOcr = Task.Run(() => OcrService.RecognizeAsync(korean, [])).GetAwaiter().GetResult();
 
+            // 다른 문자의 글도 맞는 엔진이 골라지는지 본다(해당 OCR 언어가 설치된 PC 에서만 의미가 있다)
+            var samples = new (string Name, string Font, string Text)[]
+            {
+                ("일본어", "Yu Gothic UI", "設定を保存しました。ゲームを続けますか?"),
+                ("중국어(번체)", "Microsoft JhengHei UI", "設定已儲存。您要繼續遊戲嗎?"),
+                ("중국어(간체)", "Microsoft YaHei UI", "设置已保存。您要继续游戏吗?"),
+                ("러시아어", "Segoe UI", "Настройки сохранены. Продолжить игру?"),
+                ("베트남어", "Segoe UI", "Cài đặt đã được lưu. Bạn có muốn tiếp tục trò chơi không?"),
+                ("필리핀어", "Segoe UI", "Nai-save na ang mga setting. Gusto mo bang ituloy ang laro?"),
+            };
+            var detectLines = new List<string>();
+            foreach (var (name, fontName, text) in samples)
+            {
+                using var image = new Bitmap(1100, 80);
+                using (var g = Graphics.FromImage(image))
+                using (var font = new Font(fontName, 16))
+                {
+                    g.Clear(Color.White);
+                    g.DrawString(text, font, Brushes.Black, 20, 20);
+                }
+                OcrOutput found = Task.Run(() => OcrService.RecognizeAsync(image, [])).GetAwaiter().GetResult();
+                detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}");
+            }
+
             File.WriteAllText(outputPath,
                 $"버전: {AppInfo.VersionText}\r\n업데이트 확인: {update.Message} (최신 {update.LatestVersion})\r\n" +
                 $"읽을 수 있는 언어: {string.Join(", ", OcrService.InstalledLanguageNames())}\r\n" +
                 $"한글 그림 → 엔진 {koreanOcr.Language}: {koreanOcr.Text}\r\n" +
+                string.Join("\r\n", detectLines) + "\r\n" +
                 $"OCR 언어: {ocr.Language}\r\nOCR 결과: {ocr.Text}\r\n감지 언어: {translated.SourceLang}\r\n번역: {translated.Text}\r\n");
             return 0;
         }
