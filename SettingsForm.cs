@@ -95,7 +95,7 @@ internal sealed class SettingsForm : Form
     // 왼쪽 분류 메뉴와 가운데 항목 면
     private readonly Panel _navPanel = new() { Dock = DockStyle.Left, Width = 150, BackColor = NavColor, Padding = new Padding(8, 14, 8, 8) };
     private readonly FlowLayoutPanel _nav = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = NavColor };
-    private readonly Panel _content = new() { Dock = DockStyle.Left, Width = 530, Padding = new Padding(10, 10, 10, 0) };
+    private readonly Panel _content = new() { Dock = DockStyle.Left, Width = 560, Padding = new Padding(10, 10, 10, 0) };
     private readonly List<Panel> _pages = [];
     private readonly List<Button> _navButtons = [];
     private int _selectedPage;
@@ -104,6 +104,7 @@ internal sealed class SettingsForm : Form
     private readonly Panel _previewHost;
     private readonly Panel _previewArea;        // 미리보기 전체(제목 + 그림). 숨길 수 있다
     private readonly Button _previewToggle;     // 미리보기 숨기기/보이기(화살표)
+    private readonly Panel _previewToggleHost = new() { Dock = DockStyle.Left, Width = 26, BackColor = Theme.Back };
     private readonly ToolTip _previewTip = new();
     // 미리보기는 오른쪽에 있으므로, 접을 때는 왼쪽(◀)으로 밀고 펼 때는 오른쪽(▶)으로 연다
     private const string HidePreviewArrow = "◀";
@@ -130,7 +131,7 @@ internal sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
-        ClientSize = new Size(1310, 600);
+        ClientSize = new Size(1344, 600);
         MinimumSize = new Size(600, 400);
 
         // ---- 동작 ----
@@ -449,18 +450,22 @@ internal sealed class SettingsForm : Form
         _previewToggle = new Button
         {
             Text = HidePreviewArrow,
-            Dock = DockStyle.Left,
-            Width = 22,
+            Size = new Size(18, 64),
             FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Back,
-            ForeColor = Theme.SubText,
-            Font = new Font("Segoe UI Symbol", 11f),
+            // 주변(창 배경)·왼쪽 메뉴의 회색과 겹치지 않게 가라앉힌 파랑으로 칠한다(누를 수 있는 것임이 보이게)
+            BackColor = Color.FromArgb(48, 74, 128),
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI Symbol", 9f),
             Cursor = Cursors.Hand,
             TabStop = false,
         };
         _previewToggle.FlatAppearance.BorderSize = 0;
-        _previewToggle.FlatAppearance.MouseOverBackColor = Theme.Card;
-        _previewToggle.FlatAppearance.MouseDownBackColor = Theme.Field;
+        _previewToggle.FlatAppearance.MouseOverBackColor = Theme.Accent;
+        _previewToggle.FlatAppearance.MouseDownBackColor = Theme.AccentHover;
+        // 단추는 짧게 두고, 세로 가운데에 놓는다(놓일 자리만 세로로 길다)
+        _previewToggleHost.Controls.Add(_previewToggle);
+        _previewToggleHost.Resize += (_, _) => _previewToggle.Location = new Point(
+            (_previewToggleHost.Width - _previewToggle.Width) / 2, (_previewToggleHost.Height - _previewToggle.Height) / 2);
         _previewToggle.Click += (_, _) => TogglePreview();
         _previewTip.SetToolTip(_previewToggle, "미리보기 숨기기");
         var resetAll = new Button { Text = "설정 초기화" };
@@ -470,7 +475,7 @@ internal sealed class SettingsForm : Form
 
         // Dock 은 나중에 넣은 컨트롤부터 자리를 잡는다: 아래 버튼 → 왼쪽 메뉴 → 항목 → 나머지를 미리보기가 채운다
         Controls.Add(_previewArea);
-        Controls.Add(_previewToggle);
+        Controls.Add(_previewToggleHost);
         Controls.Add(_content);
         Controls.Add(_navPanel);
         Controls.Add(buttons);
@@ -575,7 +580,7 @@ internal sealed class SettingsForm : Form
         _previewArea.Visible = show;
         _previewToggle.Text = show ? HidePreviewArrow : ShowPreviewArrow;
         _previewTip.SetToolTip(_previewToggle, show ? "미리보기 숨기기" : "미리보기 보이기");
-        int narrow = _navPanel.Width + _content.Width + _previewToggle.Width;
+        int narrow = _navPanel.Width + _content.Width + _previewToggleHost.Width;
         ClientSize = new Size(show ? Math.Max(_widthWithPreview, narrow + 300) : narrow, ClientSize.Height);
     }
 
