@@ -42,6 +42,7 @@ internal static class OcrService
             string text = BuildText(result, tag);
             if (text.Length == 0) continue;
             double score = Score(text, tag);
+            DebugLog.Write($"  엔진 {tag} 점수 {score:0.0} 글자수 {text.Length}");
             if (best == null || score > bestScore)
             {
                 best = new OcrOutput(text, tag);
@@ -49,6 +50,20 @@ internal static class OcrService
             }
         }
         return best ?? new OcrOutput("", engines[0].Tag);
+    }
+
+    /// <summary>진단용: 설치된 엔진마다 읽은 글과 점수를 돌려준다(어느 엔진이 왜 골라졌는지 확인)</summary>
+    public static async Task<List<string>> DescribeAsync(Bitmap source)
+    {
+        using var scaled = Upscale(source);
+        using var software = await ToSoftwareBitmapAsync(scaled);
+        var lines = new List<string>();
+        foreach (var (tag, engine) in CreateEngines([]))
+        {
+            string text = BuildText(await engine.RecognizeAsync(software), tag);
+            lines.Add($"{tag,-11} 점수 {Score(text, tag),5:0.0}  [{text}]");
+        }
+        return lines;
     }
 
     /// <summary>Windows 에 설치돼 있어 글자를 읽을 수 있는 언어 이름들</summary>
