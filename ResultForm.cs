@@ -13,7 +13,8 @@ internal sealed class ResultForm : Form
     private Bitmap? _crop;            // 원문 언어를 바꾸면 다시 인식하려고 들고 있는다(미리보기는 없음)
     private readonly bool _preview;
     private Rectangle _anchor;
-    private readonly Button _floatClose;   // 제목 줄을 숨겼을 때 내용 위에 겹쳐 보이는 닫기 단추
+    private readonly bool _keepFocus;      // 창이 포커스를 가져가지 않는 모드(창을 만들 때 정해지고 바뀌지 않는다)
+    private readonly Button _floatClose;  // 제목 줄을 숨겼을 때 내용 위에 겹쳐 보이는 닫기 단추
 
     /// <summary>모양 점검용: 창을 화면 밖 좌표에 띄운다</summary>
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -60,6 +61,7 @@ internal sealed class ResultForm : Form
         _crop = crop;
         _anchor = anchor;
         _preview = preview;
+        _keepFocus = config.KeepFocusOnApp;
 
         Text = "SnapTranslate";
         Font = new Font(Theme.FontName, 10f);
@@ -67,7 +69,8 @@ internal sealed class ResultForm : Form
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         if (preview) TopLevel = false;   // 설정 창 안에 넣는 자식 창
-        else TopMost = true;
+        // TopMost 속성은 창을 띄울 때 포커스를 가져오므로, 포커스 유지 모드에서는 CreateParams 의 확장 스타일로 맨 위에 둔다
+        else if (!config.KeepFocusOnApp) TopMost = true;
         ShowInTaskbar = false;
         KeyPreview = true;
         ForeColor = Theme.Text;
@@ -334,8 +337,32 @@ internal sealed class ResultForm : Form
         {
             var cp = base.CreateParams;
             if (!_preview) cp.ClassStyle |= 0x20000; // CS_DROPSHADOW (최상위 창만 가능)
+            if (!_preview && _keepFocus) cp.ExStyle |= 0x00000008; // WS_EX_TOPMOST
             return cp;
         }
+    }
+
+    /// <summary>
+    /// 포커스 유지 모드에서는 창을 띄워도 원래 쓰던 프로그램(게임 등)의 포커스를 빼앗지 않는다.
+    /// 창을 클릭하면 그때 포커스를 받으므로 원문 편집·Esc 닫기는 클릭한 뒤에 쓸 수 있다.
+    /// </summary>
+    protected override bool ShowWithoutActivation => _keepFocus && !_preview;
+
+    /// <summary>
+    /// "같은 창에 계속 표시" 설정이면 닫을 때 창을 없애지 않고 숨기기만 한다.
+    /// 창을 새로 만드는 데 0.4~0.6초가 걸려(진단 기록으로 확인) 매번 만들면 번역이 그만큼 늦게 뜬다.
+    /// </summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_preview && !TestOffscreen && _config.ReuseWindow && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            _generation++;            // 진행 중이던 인식·번역 결과는 버린다
+            _autoCloseArmed = false;
+            Hide();
+            DebugLog.Write("결과 창 숨김");
+        }
+        base.OnFormClosing(e);
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -629,7 +656,8 @@ internal sealed class ResultForm : Form
 
         // "직접 지정"은 사용자가 놓은 자리를 그대로 두고, 나머지는 새 선택 영역 기준으로 다시 놓는다
         if (_config.PositionMode != "Custom") Location = Place();
-        Activate();
+        if (!Visible) Show();   // 닫아서 숨겨 둔 창이면 다시 보인다
+        if (!_keepFocus) Activate();
         Start();
     }
 

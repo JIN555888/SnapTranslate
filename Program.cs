@@ -63,6 +63,12 @@ internal sealed class AppConfig
     /// <summary>true 면 결과 창 하나를 계속 쓰며 내용만 바꾼다. false 면 캡처할 때마다 새 창을 연다</summary>
     public bool ReuseWindow { get; set; } = true;
 
+    /// <summary>
+    /// 캡처·번역하는 동안 원래 쓰던 프로그램(게임 등)이 포커스를 잃지 않게 할지.
+    /// 켜면 선택 화면과 결과 창이 포커스를 가져가지 않는다(결과 창은 클릭하면 포커스를 받는다).
+    /// </summary>
+    public bool KeepFocusOnApp { get; set; } = true;
+
     /// <summary>결과 창에서 Esc 를 누르면 창을 닫을지</summary>
     public bool CloseOnEsc { get; set; } = true;
 
@@ -230,6 +236,9 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
 
     public event Action? Pressed;
     private bool _registered;
+    private const int EscapeId = 2;
+    private bool _escapeRegistered;
+    private Action? _onEscape;
 
     public HotkeyWindow() => CreateHandle(new CreateParams());
 
@@ -246,6 +255,20 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
     {
         if (_registered) UnregisterHotKey(Handle, HotkeyId);
         _registered = false;
+    }
+
+    /// <summary>Esc 를 잠시 전역 단축키로 건다(포커스 없이 떠 있는 선택 화면을 취소할 수 있게)</summary>
+    public void RegisterEscape(Action onEscape)
+    {
+        _onEscape = onEscape;
+        _escapeRegistered = RegisterHotKey(Handle, EscapeId, MOD_NOREPEAT, (uint)Keys.Escape);
+    }
+
+    public void UnregisterEscape()
+    {
+        if (_escapeRegistered) UnregisterHotKey(Handle, EscapeId);
+        _escapeRegistered = false;
+        _onEscape = null;
     }
 
     private static bool TryParse(string text, out uint mods, out Keys key)
@@ -274,6 +297,8 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
     {
         if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HotkeyId)
             Pressed?.Invoke();
+        else if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == EscapeId)
+            _onEscape?.Invoke();
         base.WndProc(ref m);
     }
 
@@ -395,7 +420,7 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    private void StartCapture()
+    private async void StartCapture()
     {
         if (_capturing || _settingsOpen) return;
         _capturing = true;
@@ -414,13 +439,17 @@ internal sealed class TrayContext : ApplicationContext
 
             Rectangle selection;
             timer.Restart();
-            using (var overlay = new OverlayForm(shot, screen))
+            using (var overlay = new OverlayForm(shot, screen, _config.KeepFocusOnApp))
             {
                 DebugLog.Write($"선택 화면 준비 {timer.ElapsedMilliseconds}ms");
-                DialogResult picked = overlay.ShowDialog();
-                DebugLog.Write($"선택 끝 결과={picked} 영역={overlay.Selection.Width}x{overlay.Selection.Height}");
-                if (picked != DialogResult.OK) return;
-                selection = overlay.Selection;
+                // 포커스를 가져오지 않는 모드에서는 선택 화면이 키를 받지 못하므로, 선택하는 동안만 Esc 를 전역 단축키로 건다
+                if (_config.KeepFocusOnApp) _hotkey.RegisterEscape(overlay.Cancel);
+                Rectangle? picked;
+                try { picked = await overlay.PickAsync(); }
+                finally { _hotkey.UnregisterEscape(); }
+                DebugLog.Write($"선택 끝 영역={(picked is { } r ? $"{r.Width}x{r.Height}" : "취소")} 맨 앞 창: {DebugLog.Foreground()}");
+                if (picked == null) return;
+                selection = picked.Value;
             }
             if (selection.Width < 5 || selection.Height < 5) return;
             _hitchWatcher.Start();   // 선택에 걸린 시간은 빼고, 선택이 끝난 시점부터 다시 감시한다
@@ -441,8 +470,8 @@ internal sealed class TrayContext : ApplicationContext
             var result = new ResultForm(_config, anchor, crop, OpenSettings);
             _lastResult = result;
             result.Show();
-            result.Activate();
-            DebugLog.Write($"결과 창 새로 만들어 표시 {timer.ElapsedMilliseconds}ms");
+            if (!_config.KeepFocusOnApp) result.Activate();
+            DebugLog.Write($"결과 창 새로 만들어 표시 {timer.ElapsedMilliseconds}ms 맨 앞 창: {DebugLog.Foreground()}");
             result.Start();
         }
         catch (Exception ex)
@@ -486,6 +515,23 @@ internal static class ShotTest
                     Application.DoEvents();
                     Save(settings, Path.Combine(directory, $"settings-{page}.png"));
                 }
+            }
+
+            // 포커스 유지 모드: 결과 창을 띄우고 숨겼다 다시 띄워도 맨 앞 창이 바뀌지 않는지 확인한다
+            {
+                var lines = new List<string> { "띄우기 전: " + DebugLog.Foreground() };
+                var timer = Stopwatch.StartNew();
+                using var probe = new ResultForm(new AppConfig { KeepFocusOnApp = true }, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { TestOffscreen = true };
+                probe.Show();
+                Application.DoEvents();
+                lines.Add($"처음 띄운 뒤({timer.ElapsedMilliseconds}ms): " + DebugLog.Foreground());
+                probe.Hide();
+                Application.DoEvents();
+                timer.Restart();
+                probe.Show();
+                Application.DoEvents();
+                lines.Add($"숨겼다 다시 띄운 뒤({timer.ElapsedMilliseconds}ms): " + DebugLog.Foreground());
+                File.WriteAllLines(Path.Combine(directory, "focus.txt"), lines);
             }
 
             // 문서(README)에 넣을 화면 그림: 설정 창과 번역 결과 창

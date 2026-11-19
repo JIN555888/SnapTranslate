@@ -2,23 +2,29 @@
 
 namespace SnapTranslate;
 
-/// <summary>화면 전체를 덮고 마우스 드래그로 사각 영역을 고르게 하는 창</summary>
+/// <summary>
+/// 화면 전체를 덮고 마우스 드래그로 사각 영역을 고르게 하는 창.
+/// keepFocus 로 만들면 창이 포커스를 가져가지 않는다 — 게임 등 원래 쓰던 프로그램이 포커스를 잃지 않게 하기 위함.
+/// 그 경우 키 입력을 받지 못하므로 Esc 취소는 밖에서 전역 단축키로 걸어 <see cref="Cancel"/> 을 호출한다.
+/// </summary>
 internal sealed class OverlayForm : Form
 {
     private const int WM_DPICHANGED = 0x02E0;
+    private const int WS_EX_TOPMOST = 0x00000008;
+    private const int WS_EX_NOACTIVATE = 0x08000000;
 
     private readonly Bitmap _shot;   // 원본 화면 (소유권은 호출자)
     private readonly Bitmap _dim;    // 어둡게 만든 사본
+    private readonly bool _keepFocus;
+    private readonly TaskCompletionSource<Rectangle?> _done = new();
     private Point _start;
     private bool _dragging;
     private Rectangle _selection;
 
-    /// <summary>선택 영역. 캡처 그림 기준 픽셀 좌표</summary>
-    public Rectangle Selection => _selection;
-
-    public OverlayForm(Bitmap shot, Rectangle virtualScreen)
+    public OverlayForm(Bitmap shot, Rectangle virtualScreen, bool keepFocus)
     {
         _shot = shot;
+        _keepFocus = keepFocus;
         _dim = new Bitmap(shot);
         using (var g = Graphics.FromImage(_dim))
         using (var shade = new SolidBrush(Color.FromArgb(110, 0, 0, 0)))
@@ -29,16 +35,41 @@ internal sealed class OverlayForm : Form
         StartPosition = FormStartPosition.Manual;
         Bounds = virtualScreen;
         ShowInTaskbar = false;
-        TopMost = true;
+        // TopMost 속성은 창을 띄울 때 포커스를 가져오므로, 포커스 유지 모드에서는 CreateParams 의 확장 스타일로 맨 위에 둔다
+        if (!keepFocus) TopMost = true;
         DoubleBuffered = true;
         KeyPreview = true;
         Cursor = Cursors.Cross;
     }
 
-    protected override void OnShown(EventArgs e)
+    protected override bool ShowWithoutActivation => _keepFocus;
+
+    protected override CreateParams CreateParams
     {
-        base.OnShown(e);
-        Activate();
+        get
+        {
+            var cp = base.CreateParams;
+            if (_keepFocus) cp.ExStyle |= WS_EX_TOPMOST | WS_EX_NOACTIVATE;
+            return cp;
+        }
+    }
+
+    /// <summary>창을 띄우고 선택이 끝날 때까지 기다린다. 취소하면 null, 고르면 캡처 그림 기준 픽셀 좌표</summary>
+    public Task<Rectangle?> PickAsync()
+    {
+        Show();
+        if (!_keepFocus) Activate();
+        return _done.Task;
+    }
+
+    /// <summary>선택을 취소한다(Esc)</summary>
+    public void Cancel() => Finish(false);
+
+    private void Finish(bool ok)
+    {
+        if (_done.Task.IsCompleted) return;
+        _done.SetResult(ok ? _selection : null);
+        Hide();
     }
 
     protected override void WndProc(ref Message m)
@@ -73,7 +104,7 @@ internal sealed class OverlayForm : Form
     {
         if (e.Button == MouseButtons.Right)
         {
-            DialogResult = DialogResult.Cancel;
+            Finish(false);
             return;
         }
         if (e.Button != MouseButtons.Left) return;
@@ -92,13 +123,20 @@ internal sealed class OverlayForm : Form
         if (!_dragging || e.Button != MouseButtons.Left) return;
         _dragging = false;
         UpdateSelection(e.Location);
-        DialogResult = DialogResult.OK;
+        Finish(true);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.KeyCode == Keys.Escape) DialogResult = DialogResult.Cancel;
+        if (e.KeyCode == Keys.Escape) Finish(false);
         base.OnKeyDown(e);
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        // 밖에서 창이 닫혀도 기다리는 쪽이 멈춰 있지 않게 한다
+        _done.TrySetResult(null);
+        base.OnFormClosed(e);
     }
 
     private void UpdateSelection(Point current)
