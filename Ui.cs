@@ -569,15 +569,12 @@ internal sealed class DragDot : Control
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
         TabStop = false;
         Cursor = Cursors.SizeAll;
-        Size = new Size(16, 16);
+        Size = new Size(22, 22);
     }
 
-    /// <summary>평소 색(마우스를 올리면 강조색이 된다)</summary>
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public Color DotColor { get; set; } = Theme.SubText;
-
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public Color HoverColor { get; set; } = Theme.Accent;
+    // 어두운 창에서도 밝은 창에서도 눈에 띄게 노랑으로 고정한다(마우스를 올리면 더 밝아진다)
+    private static readonly Color DotColor = Color.FromArgb(255, 204, 64);
+    private static readonly Color HoverColor = Color.FromArgb(255, 226, 130);
 
     protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hover = true; Invalidate(); }
     protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hover = false; Invalidate(); }

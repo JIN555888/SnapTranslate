@@ -631,8 +631,6 @@ internal sealed class ResultForm : Form
         _floatClose.ForeColor = label;
         _dragDot.Visible = !_config.ShowTitleBar;
         _dragDot.BackColor = back;
-        _dragDot.DotColor = label;
-        _dragDot.HoverColor = accent;
         PlaceFloatClose();
         _floatClose.BringToFront();
         if (_closeMenuItem != null) _closeMenuItem.Text = _config.CloseOnEsc ? "닫기 (Esc)" : "닫기";
