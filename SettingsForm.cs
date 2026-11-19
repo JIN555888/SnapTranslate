@@ -103,7 +103,11 @@ internal sealed class SettingsForm : Form
     private readonly Label _message;
     private readonly Panel _previewHost;
     private readonly Panel _previewArea;        // 미리보기 전체(제목 + 그림). 숨길 수 있다
-    private readonly Button _previewToggle;     // 미리보기 숨기기/보이기
+    private readonly Button _previewToggle;     // 미리보기 숨기기/보이기(화살표)
+    private readonly ToolTip _previewTip = new();
+    // 미리보기는 오른쪽에 있으므로, 접을 때는 왼쪽(◀)으로 밀고 펼 때는 오른쪽(▶)으로 연다
+    private const string HidePreviewArrow = "◀";
+    private const string ShowPreviewArrow = "▶";
     private int _widthWithPreview;              // 미리보기를 보일 때의 창 안쪽 너비
     private ResultForm? _preview;
 
@@ -462,10 +466,24 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(save);
         buttons.Controls.Add(_message);
-        _previewToggle = new Button { Text = "미리보기 숨기기" };
-        Theme.StyleButton(_previewToggle, false);
+        // 미리보기 접기/펴기. 항목 영역과 미리보기 사이에 세로로 긴 화살표 단추를 둔다(서랍 손잡이처럼)
+        _previewToggle = new Button
+        {
+            Text = HidePreviewArrow,
+            Dock = DockStyle.Left,
+            Width = 22,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Theme.Back,
+            ForeColor = Theme.SubText,
+            Font = new Font("Segoe UI Symbol", 11f),
+            Cursor = Cursors.Hand,
+            TabStop = false,
+        };
+        _previewToggle.FlatAppearance.BorderSize = 0;
+        _previewToggle.FlatAppearance.MouseOverBackColor = Theme.Card;
+        _previewToggle.FlatAppearance.MouseDownBackColor = Theme.Field;
         _previewToggle.Click += (_, _) => TogglePreview();
-        buttons.Controls.Add(_previewToggle);
+        _previewTip.SetToolTip(_previewToggle, "미리보기 숨기기");
         var resetAll = new Button { Text = "설정 초기화" };
         Theme.StyleButton(resetAll, false);
         resetAll.Click += (_, _) => ResetAll();
@@ -473,6 +491,7 @@ internal sealed class SettingsForm : Form
 
         // Dock 은 나중에 넣은 컨트롤부터 자리를 잡는다: 아래 버튼 → 왼쪽 메뉴 → 항목 → 나머지를 미리보기가 채운다
         Controls.Add(_previewArea);
+        Controls.Add(_previewToggle);
         Controls.Add(_content);
         Controls.Add(_navPanel);
         Controls.Add(buttons);
@@ -669,8 +688,9 @@ internal sealed class SettingsForm : Form
         if (_previewArea.Visible == show) return;
         if (!show) _widthWithPreview = ClientSize.Width;
         _previewArea.Visible = show;
-        _previewToggle.Text = show ? "미리보기 숨기기" : "미리보기 보이기";
-        int narrow = _navPanel.Width + _content.Width;
+        _previewToggle.Text = show ? HidePreviewArrow : ShowPreviewArrow;
+        _previewTip.SetToolTip(_previewToggle, show ? "미리보기 숨기기" : "미리보기 보이기");
+        int narrow = _navPanel.Width + _content.Width + _previewToggle.Width;
         ClientSize = new Size(show ? Math.Max(_widthWithPreview, narrow + 300) : narrow, ClientSize.Height);
     }
 
