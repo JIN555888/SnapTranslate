@@ -116,6 +116,29 @@ internal static class Translator
         return clean;
     }
 
+    /// <summary>
+    /// 설정 화면의 순위 칸(1·2·3순위) 모양으로 맞춘다. 칸 수는 번역기 수와 같고, 빈 칸("")은 "사용 안 함"이다.
+    /// 잘못된 이름과 겹친 번역기는 빈 칸으로 바꾸고, 1순위가 비면 뒤의 번역기를 앞으로 당긴다.
+    /// </summary>
+    public static List<string> NormalizeSlots(IEnumerable<string>? order)
+    {
+        var slots = new List<string>();
+        foreach (string raw in order ?? [])
+        {
+            if (slots.Count == AllEngines.Length) break;
+            string engine = IsEngine(raw) ? raw.ToLowerInvariant() : "";
+            slots.Add(slots.Contains(engine) ? "" : engine);
+        }
+        while (slots.Count < AllEngines.Length) slots.Add("");
+        if (slots[0].Length == 0)
+        {
+            int next = slots.FindIndex(slot => slot.Length > 0);
+            slots[0] = next < 0 ? Google : slots[next];
+            if (next > 0) slots[next] = "";
+        }
+        return slots;
+    }
+
     /// <summary>시도할 번역기 순서. 설정한 우선순위대로이고, 방금 제한에 걸린 것은 뒤로 간다</summary>
     private static List<string> EngineOrder(TranslateOptions options)
     {

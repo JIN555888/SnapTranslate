@@ -472,9 +472,9 @@ internal sealed class SettingsForm : Form
             _keepFocus.Checked = c.KeepFocusOnApp;
             _checkUpdate.Checked = c.CheckUpdateOnStart;
             _startupNotice.Checked = c.ShowStartupNotice;
-            var order = Translator.CleanOrder(c.TranslateOrder);
+            var order = Translator.NormalizeSlots(c.TranslateOrder);
             for (int i = 0; i < _engines.Length; i++)
-                _engines[i].SelectedItem = i < order.Count ? Engines.First(e => e.Code == order[i]) : NoEngine;
+                _engines[i].SelectedItem = Engines.FirstOrDefault(e => e.Code == order[i]) ?? NoEngine;
             _geminiKey.Text = c.GeminiApiKey;
 
             _opacity.Value = c.Opacity;
@@ -526,7 +526,7 @@ internal sealed class SettingsForm : Form
         c.KeepFocusOnApp = _keepFocus.Checked;
         c.CheckUpdateOnStart = _checkUpdate.Checked;
         c.ShowStartupNotice = _startupNotice.Checked;
-        c.TranslateOrder = Translator.CleanOrder(_engines.Select(combo => (combo.SelectedItem as LangItem)?.Code ?? ""));
+        c.TranslateOrder = Translator.NormalizeSlots(_engines.Select(combo => (combo.SelectedItem as LangItem)?.Code ?? ""));
         c.GeminiApiKey = _geminiKey.Text.Trim();
 
         c.Opacity = (int)_opacity.Value;
