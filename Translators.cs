@@ -233,9 +233,13 @@ internal static class Translator
                 using var response = await SendAsync(request, 15);
                 int code = (int)response.StatusCode;
                 if (code == 429) throw new TranslateException("하루 무료 사용량을 다 씀", true);
-                if (!response.IsSuccessStatusCode) throw new TranslateException($"서버 응답 {code}");
 
-                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                // 오류일 때도 본문(JSON)에 이유가 들어 있으므로 먼저 읽어 본다
+                string body = await response.Content.ReadAsStringAsync();
+                JsonDocument doc;
+                try { doc = JsonDocument.Parse(body); }
+                catch (JsonException) { throw new TranslateException($"서버 응답 {code}"); }
+                using var parsed = doc;
                 var root = doc.RootElement;
                 // responseStatus 는 숫자로도 문자열로도 온다
                 string status = root.TryGetProperty("responseStatus", out var s) ? s.ToString() : "";
@@ -254,6 +258,10 @@ internal static class Translator
                 if (status != "200")
                 {
                     string details = root.TryGetProperty("responseDetails", out var r) ? r.ToString() : "";
+                    // 원문이 이미 번역 언어이면 "서로 다른 두 언어를 고르라"는 오류가 온다.
+                    // Google 번역처럼 원문을 그대로 돌려주고 감지 언어를 번역 언어로 알린다(그래야 자동 전환 규칙이 돈다)
+                    if (details.Contains("DISTINCT LANGUAGES", StringComparison.OrdinalIgnoreCase))
+                        return new TranslateOutput(NormalizeLines(text), target, target, MyMemory);
                     throw new TranslateException($"응답 {status} {Shorten(details)}".Trim());
                 }
 
