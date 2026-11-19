@@ -507,7 +507,7 @@ internal sealed class SlimSlider : Control
     }
 }
 
-/// <summary>진행 중임을 알리는 점 세 개. 지금 차례인 점만 강조색으로 칠한다</summary>
+/// <summary>진행 중임을 알리는 점 세 개. 지금 차례인 점만 제 색(노랑·빨강·초록)으로 칠한다</summary>
 internal sealed class BusyDots : Control
 {
     private int _frame;
@@ -526,8 +526,13 @@ internal sealed class BusyDots : Control
         set { _frame = value; Invalidate(); }
     }
 
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public Color ActiveColor { get; set; } = Theme.Accent;
+    // 점마다 켜질 때의 색: 노랑 → 빨강 → 초록 순으로 돌아가며 켜진다
+    private static readonly Color[] ActiveColors =
+    [
+        Color.FromArgb(255, 204, 64),
+        Color.FromArgb(240, 84, 84),
+        Color.FromArgb(76, 200, 120),
+    ];
 
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Color IdleColor { get; set; } = Theme.Field;
@@ -548,7 +553,7 @@ internal sealed class BusyDots : Control
         int y = (Height - dot) / 2 + 1;
         for (int i = 0; i < 3; i++)
         {
-            using var brush = new SolidBrush(i == _frame ? ActiveColor : IdleColor);
+            using var brush = new SolidBrush(i == _frame ? ActiveColors[i] : IdleColor);
             e.Graphics.FillEllipse(brush, 1 + i * (dot + gap), y, dot, dot);
         }
     }

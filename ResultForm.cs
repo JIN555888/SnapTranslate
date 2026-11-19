@@ -285,8 +285,8 @@ internal sealed class ResultForm : Form
     /// </summary>
     private void ShowNote(string text) => ShowNote(text, false);
 
-    // 진행 중 표시의 점이 강조되는 순서(왼쪽 → 오른쪽 → 다시 왼쪽). 멈춘 것이 아니라 일하는 중임을 보인다
-    private static readonly int[] BusySteps = [0, 1, 2, 1];
+    // 진행 중 표시의 점이 켜지는 순서(노랑 → 빨강 → 초록, 다시 처음으로). 멈춘 것이 아니라 일하는 중임을 보인다
+    private static readonly int[] BusySteps = [0, 1, 2];
     private readonly System.Windows.Forms.Timer _busyTimer = new() { Interval = 300 };
     private int _busyStep;
 
@@ -335,7 +335,6 @@ internal sealed class ResultForm : Form
         _busyDots.Size = size;
         _busyDots.Location = new Point(origin.X + charSize.Width + size.Height / 3, origin.Y);
         _busyDots.BackColor = Theme.ParseColor(_config.CardColor, Theme.Card);
-        _busyDots.ActiveColor = Theme.ParseColor(_config.AccentColor, Theme.Accent);
         _busyDots.IdleColor = Theme.ParseColor(_config.FieldColor, Theme.Field);
         _busyDots.Visible = true;
         _busyDots.BringToFront();
