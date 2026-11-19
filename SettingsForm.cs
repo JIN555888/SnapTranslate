@@ -85,7 +85,7 @@ internal sealed class SettingsForm : Form
     // 왼쪽 분류 메뉴와 가운데 항목 면
     private readonly Panel _navPanel = new() { Dock = DockStyle.Left, Width = 150, BackColor = NavColor, Padding = new Padding(8, 14, 8, 8) };
     private readonly FlowLayoutPanel _nav = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = NavColor };
-    private readonly Panel _content = new() { Dock = DockStyle.Left, Width = 510, Padding = new Padding(10, 10, 10, 0) };
+    private readonly Panel _content = new() { Dock = DockStyle.Left, Width = 530, Padding = new Padding(10, 10, 10, 0) };
     private readonly List<Panel> _pages = [];
     private readonly List<Button> _navButtons = [];
     private int _selectedPage;
@@ -116,7 +116,7 @@ internal sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
-        ClientSize = new Size(1290, 600);
+        ClientSize = new Size(1310, 600);
         MinimumSize = new Size(600, 400);
 
         // ---- 동작 ----
@@ -696,7 +696,8 @@ internal sealed class SettingsForm : Form
     /// <summary>분류 하나(왼쪽 메뉴 단추 + 가운데 항목 면)를 만들고, 항목을 넣을 표를 돌려준다</summary>
     private TableLayoutPanel NewPage(string title, string description)
     {
-        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2 };
+        // 아래·오른쪽 여백은 표 안쪽에 둔다(스크롤되는 판의 여백은 끝까지 내렸을 때 적용되지 않는다)
+        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, Padding = new Padding(0, 0, 14, 28) };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         AddWide(grid, new Label { Text = title, AutoSize = true, ForeColor = Theme.Text, Font = new Font(Theme.FontName, 13f, FontStyle.Bold), Margin = new Padding(3, 0, 3, 2) });
