@@ -49,6 +49,7 @@ internal sealed class ResultForm : Form
     private readonly System.Windows.Forms.Timer _closeTimer = new() { Interval = 250 };
     private bool _controlsReady;    // 자식 컨트롤 핸들이 모두 만들어졌는지(OnLoad 이후 true)
     private bool _darkCard = true; // 칸 배경이 어두운지(스크롤 막대 테마 선택용)
+    private bool _translatedIsNote;  // 번역 칸에 번역문이 아니라 안내 글(진행 상태·오류)이 들어 있는지
     private bool _autoCloseArmed;  // 번역이 끝나 자동 닫힘 시간을 재기 시작했는지
     private int _idleMs;            // 마우스가 창 밖에 있었던 시간
     private bool _layoutReady;      // 처음 배치가 끝난 뒤에만 크기 변경을 설정에 저장한다
@@ -115,6 +116,7 @@ internal sealed class ResultForm : Form
             // 글이 칸을 넘칠 때만 스크롤 막대를 보인다
             box.TextChanged += (_, _) => UpdateScrollBar(box);
             box.SizeChanged += (_, _) => UpdateScrollBar(box);
+            box.MouseWheel += (_, e) => OnTextBoxWheel(box, e);
             // 핸들이 다시 만들어져도 스크롤 막대 테마가 유지되게 한다
             box.HandleCreated += (_, _) => Theme.ApplyScrollTheme(box, _darkCard);
         }
@@ -175,9 +177,9 @@ internal sealed class ResultForm : Form
         // 제목 줄을 숨겼을 때 쓰는 닫기 단추. 배치 표에 넣지 않고 창 위에 직접 올려 내용과 겹치게 한다
         _floatClose = CreateTitleButton("✕");
         _floatClose.Dock = DockStyle.None;
-        _floatClose.Size = new Size(22, 20);
+        _floatClose.Size = new Size(20, 18);
         _floatClose.Font = new Font("Segoe UI Symbol", 8f);
-        _floatClose.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        // 위치는 PlaceFloatClose 에서 직접 정한다(창 바깥 여백 위에 두면 Anchor 로는 오른쪽에 붙어 있지 않았다)
         _floatClose.FlatAppearance.MouseOverBackColor = Theme.Danger;
         _floatClose.Visible = false;
         Controls.Add(_floatClose);
@@ -201,10 +203,62 @@ internal sealed class ResultForm : Form
     public void SetTexts(string original, string translated, string? status = null)
     {
         SetText(_original, original);
-        SetText(_translated, translated);
+        ShowTranslation(translated);
         _retranslate.Enabled = original.Length > 0;
         _copy.Enabled = translated.Length > 0;
         if (status != null) _status.Text = status;
+    }
+
+    /// <summary>닫기 단추를 창 오른쪽 위 구석에 바짝 붙인다</summary>
+    private void PlaceFloatClose()
+    {
+        _floatClose.Location = new Point(ClientSize.Width - _floatClose.Width - 2, 2);
+        _floatClose.BringToFront();
+    }
+
+    protected override void OnClientSizeChanged(EventArgs e)
+    {
+        base.OnClientSizeChanged(e);
+        if (_floatClose != null) PlaceFloatClose();   // 생성자 도중에도 불리므로 만들어진 뒤에만
+    }
+
+    /// <summary>Ctrl + 마우스 휠로 그 칸의 글자 크기를 0.5 씩 바꾸고 설정에 저장한다</summary>
+    private void OnTextBoxWheel(TextBox box, MouseEventArgs e)
+    {
+        if ((ModifierKeys & Keys.Control) == 0 || _preview) return;
+        if (e is HandledMouseEventArgs handled) handled.Handled = true;   // 글이 같이 스크롤되지 않게
+
+        double step = e.Delta > 0 ? 0.5 : -0.5;
+        if (box == _original)
+            _config.OriginalFontSize = Math.Clamp(_config.OriginalFontSize + step, 6, 40);
+        else
+            _config.TranslatedFontSize = Math.Clamp(_config.TranslatedFontSize + step, 6, 40);
+
+        SetFont(_original, _config.FontName, (float)_config.OriginalFontSize);
+        SetFont(_translated, _config.FontName, (float)_config.TranslatedFontSize);
+        UpdateScrollBar(box);
+        try { _config.Save(); }
+        catch (Exception ex) { _status.Text = "설정 저장 실패: " + ex.Message; }
+    }
+
+    /// <summary>
+    /// 번역 칸에 진행 상태·오류 같은 안내 글을 흐린 색으로 보인다.
+    /// 아래 줄(상태 표시)을 숨기고 쓰면 번역되는 동안 칸이 빈 채로 보여, 번역 칸 자체에 상태를 적는다.
+    /// </summary>
+    private void ShowNote(string text)
+    {
+        _translatedIsNote = true;
+        _translated.ForeColor = Theme.ParseColor(_config.LabelColor, Theme.SubText);
+        SetText(_translated, text);
+        _copy.Enabled = false;
+    }
+
+    /// <summary>번역 칸에 실제 번역문을 보인다(안내 글이었으면 글자 색을 되돌린다)</summary>
+    private void ShowTranslation(string text)
+    {
+        _translatedIsNote = false;
+        _translated.ForeColor = Theme.ParseColor(_config.TranslatedColor, Theme.Text);
+        SetText(_translated, text);
     }
 
     /// <summary>
@@ -433,7 +487,7 @@ internal sealed class ResultForm : Form
         _originalCard.BackColor = _translatedCard.BackColor = card;
         _original.BackColor = _translated.BackColor = card;
         _original.ForeColor = Theme.ParseColor(_config.OriginalColor, Theme.SubText);
-        _translated.ForeColor = Theme.ParseColor(_config.TranslatedColor, Theme.Text);
+        _translated.ForeColor = _translatedIsNote ? label : Theme.ParseColor(_config.TranslatedColor, Theme.Text);
         SetFont(_original, _config.FontName, (float)_config.OriginalFontSize);
         SetFont(_translated, _config.FontName, (float)_config.TranslatedFontSize);
         _darkCard = !Theme.IsLight(card);
@@ -463,9 +517,9 @@ internal sealed class ResultForm : Form
         // 제목 줄을 숨기면 줄 자체는 없애고(위쪽 여백이 생기지 않게), 닫기 단추만 내용 오른쪽 위에 겹쳐 띄운다
         SetRow(0, _titleBar, _config.ShowTitleBar, _rowHeights[0]);
         _floatClose.Visible = !_config.ShowTitleBar;
-        _floatClose.BackColor = _config.ShowLanguageRow ? back : card;   // 바로 밑에 깔리는 부분의 색에 맞춘다
+        _floatClose.BackColor = back;   // 창 구석(바깥 여백) 위에 놓이므로 창 배경색에 맞춘다
         _floatClose.ForeColor = label;
-        _floatClose.Location = new Point(ClientSize.Width - Padding.Right - _floatClose.Width - 6, Padding.Top + 6);
+        PlaceFloatClose();
         _floatClose.BringToFront();
         if (_closeMenuItem != null) _closeMenuItem.Text = _config.CloseOnEsc ? "닫기 (Esc)" : "닫기";
         SetRow(1, _langRow, _config.ShowLanguageRow, _rowHeights[1]);
@@ -645,7 +699,7 @@ internal sealed class ResultForm : Form
         _anchor = anchor;
 
         SetText(_original, "");
-        SetText(_translated, "");
+        ShowNote("글자 인식 중…");
         _copy.Enabled = false;
         _autoCloseArmed = false;
         // 이전 캡처에서 바꾼 언어 선택은 설정 기본값으로 되돌린다
@@ -688,6 +742,7 @@ internal sealed class ResultForm : Form
             if (languages != null || _original.Text.Length == 0)
             {
                 _status.Text = "글자 인식 중…";
+                ShowNote("글자 인식 중…");
                 var ocrTimer = System.Diagnostics.Stopwatch.StartNew();
                 var ocr = await OcrService.RecognizeAsync(_crop, languages ?? []);
                 DebugLog.Write($"글자 인식 {_crop.Width}x{_crop.Height} {ocrTimer.ElapsedMilliseconds}ms 글자수={ocr.Text.Length} 엔진={ocr.Language}");
@@ -697,7 +752,7 @@ internal sealed class ResultForm : Form
             _retranslate.Enabled = true;
             if (_original.Text.Trim().Length == 0)
             {
-                SetText(_translated, "");
+                ShowNote("글자를 찾지 못했습니다.");
                 _copy.Enabled = false;
                 _status.Text = "글자를 찾지 못했습니다." + note;
                 ArmAutoClose();
@@ -706,7 +761,11 @@ internal sealed class ResultForm : Form
         }
         catch (Exception ex)
         {
-            if (!IsDisposed) _status.Text = "인식 실패: " + ex.Message;
+            if (!IsDisposed)
+            {
+                _status.Text = "인식 실패: " + ex.Message;
+                ShowNote("인식 실패: " + ex.Message);
+            }
             return;
         }
         await TranslateAsync(initial, note);
@@ -725,6 +784,7 @@ internal sealed class ResultForm : Form
         string? alt = initial && source == "auto" ? _config.AltTargetLang : null;
 
         _status.Text = "번역 중…";
+        ShowNote("번역 중…");
         try
         {
             var translateTimer = System.Diagnostics.Stopwatch.StartNew();
@@ -732,7 +792,7 @@ internal sealed class ResultForm : Form
             DebugLog.Write($"번역 {translateTimer.ElapsedMilliseconds}ms 글자수={result.Text.Length} 맨 앞 창: {DebugLog.Foreground()}");
             if (IsDisposed || generation != _generation) return;
 
-            SetText(_translated, result.Text);
+            ShowTranslation(result.Text);
             _copy.Enabled = result.Text.Length > 0;
             // 자동 전환으로 번역 언어가 바뀌었으면 콤보에도 반영한다
             _suppressEvents = true;
@@ -748,13 +808,17 @@ internal sealed class ResultForm : Form
         }
         catch (Exception ex)
         {
-            if (!IsDisposed && generation == _generation) _status.Text = "번역 실패: " + ex.Message;
+            if (!IsDisposed && generation == _generation)
+            {
+                _status.Text = "번역 실패: " + ex.Message;
+                ShowNote("번역 실패: " + ex.Message);
+            }
         }
     }
 
     private void CopyTranslation()
     {
-        if (_translated.Text.Length == 0) return;
+        if (_translatedIsNote || _translated.Text.Length == 0) return;
         try
         {
             Clipboard.SetText(_translated.Text);

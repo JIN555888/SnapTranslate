@@ -20,6 +20,10 @@ internal static class Program
         if (args.Length >= 2 && args[0] == "--shot")
             return ShotTest.Run(args[1]);
 
+        // 주어진 글을 여러 모양(크기·색)으로 그려, 엔진마다 어떻게 읽고 어느 것이 골라지는지 적는 점검 모드
+        if (args.Length >= 3 && args[0] == "--ocr-probe")
+            return SelfTest.RunOcrProbe(args[1], args[2]);
+
         // 업데이트를 설치하지만 다시 시작하지는 않는 점검 모드(설치 과정 확인용)
         if (args.Length >= 2 && args[0] == "--update-test")
             return SelfTest.RunUpdate(args[1]);
@@ -635,6 +639,49 @@ internal static class ShotTest
 /// <summary>글자를 그린 그림으로 OCR → 번역 경로를 화면 없이 점검한다</summary>
 internal static class SelfTest
 {
+    /// <summary>글을 크기·색을 바꿔 가며 그려 엔진별 인식 결과와 최종 선택을 파일에 적는다(짧은 글·작은 글자에서 감지가 틀리는 경우 확인)</summary>
+    public static int RunOcrProbe(string text, string outputPath)
+    {
+        var log = new List<string>();
+        try
+        {
+            var styles = new (string Name, string Font, float Size, Color Fore, Color Back, int Pad)[]
+            {
+                ("큰 글자·흰 바탕", "Segoe UI", 16, Color.Black, Color.White, 20),
+                ("보통 글자·흰 바탕·딱 맞게 자름", "Segoe UI", 11, Color.Black, Color.White, 3),
+                ("작은 글자·흰 바탕·딱 맞게 자름", "Segoe UI", 8, Color.Black, Color.White, 3),
+                ("보통 글자·어두운 바탕", "Segoe UI", 11, Color.White, Color.FromArgb(24, 26, 32), 6),
+                ("작은 글자·어두운 바탕", "Arial", 8, Color.FromArgb(220, 220, 220), Color.FromArgb(24, 26, 32), 4),
+                ("굵은 글자·색 바탕", "Tahoma", 10, Color.FromArgb(255, 230, 120), Color.FromArgb(60, 40, 30), 5),
+            };
+            foreach (var (name, fontName, size, fore, back, pad) in styles)
+            {
+                using var font = new Font(fontName, size);
+                Size measured = TextRenderer.MeasureText(text, font);
+                using var image = new Bitmap(measured.Width + pad * 2, measured.Height + pad * 2);
+                using (var g = Graphics.FromImage(image))
+                using (var brush = new SolidBrush(fore))
+                {
+                    g.Clear(back);
+                    g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                    g.DrawString(text, font, brush, pad, pad);
+                }
+                OcrOutput chosen = Task.Run(() => OcrService.RecognizeAsync(image, [])).GetAwaiter().GetResult();
+                log.Add($"== {name} ({image.Width}x{image.Height}) → 선택 {chosen.Language}: [{chosen.Text}]");
+                foreach (string line in Task.Run(() => OcrService.DescribeAsync(image)).GetAwaiter().GetResult())
+                    log.Add("   " + line);
+            }
+            File.WriteAllLines(outputPath, log);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            log.Add("실패: " + ex);
+            File.WriteAllLines(outputPath, log);
+            return 1;
+        }
+    }
+
     /// <summary>새 버전을 확인해 내려받고 파일을 바꾸는 데까지 진행하고(다시 시작은 안 함) 과정을 파일에 적는다</summary>
     public static int RunUpdate(string outputPath)
     {
@@ -699,6 +746,7 @@ internal static class SelfTest
                 ("중국어(번체)", "Microsoft JhengHei UI", "設定已儲存。您要繼續遊戲嗎?"),
                 ("중국어(간체)", "Microsoft YaHei UI", "设置已保存。您要继续游戏吗?"),
                 ("러시아어", "Segoe UI", "Настройки сохранены. Продолжить игру?"),
+                ("러시아어 한 단어", "Segoe UI", "обманет"),
                 ("베트남어", "Segoe UI", "Cài đặt đã được lưu. Bạn có muốn tiếp tục trò chơi không?"),
                 ("필리핀어", "Segoe UI", "Nai-save na ang mga setting. Gusto mo bang ituloy ang laro?"),
             };
@@ -713,7 +761,14 @@ internal static class SelfTest
                     g.DrawString(text, font, Brushes.Black, 20, 20);
                 }
                 OcrOutput found = Task.Run(() => OcrService.RecognizeAsync(image, [])).GetAwaiter().GetResult();
-                detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}");
+                // 번역기의 언어 자동 감지까지 맞는지 본다
+                string translatedSample = "";
+                if (found.Text.Length > 0)
+                {
+                    var auto = Task.Run(() => Translator.TranslateAsync(found.Text, "auto", config.TargetLang, null)).GetAwaiter().GetResult();
+                    translatedSample = $" ⇒ (번역기 감지 {auto.SourceLang}) {auto.Text}";
+                }
+                detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}{translatedSample}");
             }
 
             File.WriteAllText(outputPath,
