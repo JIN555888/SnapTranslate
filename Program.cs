@@ -576,7 +576,7 @@ internal static class ShotTest
         try
         {
             Directory.CreateDirectory(directory);
-            var config = new AppConfig();
+            var config = new AppConfig { Glossary = ["Aerith=에어리스", "Mana Potion=마나 물약", "Cloud=클라우드"] };
 
             // 미리보기를 숨긴 설정 창(창이 메뉴·항목 너비로 줄어드는지 확인)
             var narrowConfig = new AppConfig { ShowSettingsPreview = false };
