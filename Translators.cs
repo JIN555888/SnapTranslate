@@ -32,10 +32,11 @@ internal static class Translator
     public const string MyMemory = "mymemory";
     public const string Gemini = "gemini";
 
-    public const string DefaultGeminiModel = "gemini-flash-latest";
+    // 번역에는 빠른 모델이 맞다. 큰 모델은 답하기 전에 오래 생각해 수십 초가 걸렸다
+    public const string DefaultGeminiModel = "gemini-3.5-flash-lite";
 
-    /// <summary>기본 모델이 붐빌 때 대신 쓰는 가벼운 모델</summary>
-    public const string GeminiBackupModel = "gemini-3.5-flash-lite";
+    /// <summary>고른 모델이 붐비거나 늦을 때 대신 쓰는 모델</summary>
+    public const string GeminiBackupModel = "gemini-flash-latest";
 
     /// <summary>Gemini API 키를 만드는 페이지</summary>
     public const string GeminiKeyUrl = "https://aistudio.google.com/apikey";
@@ -356,34 +357,56 @@ internal static class Translator
             "Reply with JSON only, in this shape: " +
             "{\"source\":\"<code of the source language, such as en, ja, zh-CN, ru, ko>\",\"text\":\"<the translation>\"}";
 
-        var payload = new
+        var system = new { parts = new[] { new { text = instruction } } };
+        var contents = new[] { new { role = "user", parts = new[] { new { text } } } };
+        // 번역은 깊이 생각할 일이 아니므로 생각을 가장 적게 하도록 요청한다(빠르게 답하게)
+        string fastJson = JsonSerializer.Serialize(new
         {
-            systemInstruction = new { parts = new[] { new { text = instruction } } },
-            contents = new[] { new { role = "user", parts = new[] { new { text } } } },
+            systemInstruction = system,
+            contents,
+            generationConfig = new { responseMimeType = "application/json", thinkingConfig = new { thinkingLevel = "minimal" } },
+        });
+        // 생각 설정을 받지 않는 모델에는 이 설정 없이 보낸다
+        string plainJson = JsonSerializer.Serialize(new
+        {
+            systemInstruction = system,
+            contents,
             generationConfig = new { responseMimeType = "application/json" },
-        };
-        // 모델이 붐비면(500·503) 잠깐 쉬고 다시 보낸다. 그래도 안 되면 가벼운 모델로 한 번 더 시도한다
-        string json = JsonSerializer.Serialize(payload);
+        });
+
+        // 붐비면(500·503) 잠깐 쉬고 한 번 더 보내고, 늦으면(시간 초과) 바로 다른 모델로 넘어간다
         string body = "";
         var models = new List<string> { model };
         if (!model.Equals(GeminiBackupModel, StringComparison.OrdinalIgnoreCase)) models.Add(GeminiBackupModel);
-        for (int m = 0; m < models.Count; m++)
+        bool done = false;
+        for (int m = 0; m < models.Count && !done; m++)
         {
-            int tries = m == 0 ? 3 : 1;
-            for (int attempt = 1; attempt <= tries; attempt++)
+            bool lastModel = m == models.Count - 1;
+            for (int attempt = 1; attempt <= 2 && !done; attempt++)
             {
                 try
                 {
-                    body = await GeminiPostAsync(models[m], key, json);
-                    m = models.Count;   // 성공: 바깥 반복도 끝낸다
-                    break;
+                    bool plain;
+                    lock (GeminiPlainModels) plain = GeminiPlainModels.Contains(models[m]);
+                    try
+                    {
+                        body = await GeminiPostAsync(models[m], key, plain ? plainJson : fastJson);
+                    }
+                    catch (GeminiThinkingException) when (!plain)
+                    {
+                        DebugLog.Write($"  Gemini {models[m]} 생각 설정 미지원, 설정 없이 다시 보냄");
+                        lock (GeminiPlainModels) GeminiPlainModels.Add(models[m]);
+                        body = await GeminiPostAsync(models[m], key, plainJson);
+                    }
+                    done = true;
                 }
                 catch (GeminiBusyException busy)
                 {
-                    DebugLog.Write($"  Gemini {models[m]} 붐빔({attempt}/{tries})");
-                    bool last = attempt == tries && m == models.Count - 1;
-                    if (last) throw new TranslateException(busy.Message);
-                    if (attempt < tries) await Task.Delay(700 * attempt);
+                    DebugLog.Write($"  Gemini {models[m]} {busy.Message} ({attempt}/2)");
+                    bool retrySame = !busy.TimedOut && attempt < 2;
+                    if (!retrySame && lastModel) throw new TranslateException(busy.Message);
+                    if (!retrySame) break;
+                    await Task.Delay(700);
                 }
             }
         }
@@ -412,8 +435,20 @@ internal static class Translator
         return new TranslateOutput(NormalizeLines(translated), detected, target, Gemini);
     }
 
-    /// <summary>모델이 붐벼서(500·503) 잠시 뒤 다시 보내면 될 수 있는 실패</summary>
-    private sealed class GeminiBusyException(string message) : Exception(message);
+    /// <summary>모델이 붐비거나(500·503) 늦어서, 다시 보내거나 다른 모델로 바꾸면 될 수 있는 실패</summary>
+    private sealed class GeminiBusyException(string message, bool timedOut = false) : Exception(message)
+    {
+        public bool TimedOut { get; } = timedOut;
+    }
+
+    /// <summary>모델이 생각 설정(thinkingConfig)을 받지 않는다는 응답</summary>
+    private sealed class GeminiThinkingException() : Exception("thinkingConfig 미지원");
+
+    // 생각 설정을 받지 않는다고 확인된 모델. 다음부터는 처음부터 설정 없이 보낸다
+    private static readonly HashSet<string> GeminiPlainModels = new(StringComparer.OrdinalIgnoreCase);
+
+    // 한 번 요청에 기다리는 시간(초). 번역은 보통 1~3초면 끝난다
+    private const int GeminiTimeoutSeconds = 15;
 
     /// <summary>Gemini 에 요청을 한 번 보내고 응답 본문을 돌려준다</summary>
     private static async Task<string> GeminiPostAsync(string model, string key, string json)
@@ -426,7 +461,10 @@ internal static class Translator
         // 키는 주소가 아니라 헤더로 보낸다(주소는 기록에 남기 쉽다)
         request.Headers.Add("x-goog-api-key", key);
 
-        using var response = await SendAsync(request, 40);
+        HttpResponseMessage response;
+        try { response = await SendAsync(request, GeminiTimeoutSeconds); }
+        catch (OperationCanceledException) { throw new GeminiBusyException($"{GeminiTimeoutSeconds}초 안에 응답 없음", true); }
+        using var owned = response;
         string body = await response.Content.ReadAsStringAsync();
         if (response.IsSuccessStatusCode) return body;
 
@@ -439,6 +477,7 @@ internal static class Translator
                 detail = m.ToString();
         }
         catch (JsonException) { }
+        if (code == 400 && detail.Contains("thinking", StringComparison.OrdinalIgnoreCase)) throw new GeminiThinkingException();
         if (code is 500 or 503) throw new GeminiBusyException($"서버가 붐빔({code}). 잠시 뒤 다시 시도하세요");
         string reason = code switch
         {
