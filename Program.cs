@@ -61,11 +61,11 @@ internal sealed class AppConfig
     /// <summary>원문이 이미 TargetLang 이면 이 언어로 번역한다</summary>
     public string AltTargetLang { get; set; } = "en";
 
-    /// <summary>번역기: google(기본) / mymemory / gemini</summary>
-    public string TranslateEngine { get; set; } = Translator.Google;
-
-    /// <summary>고른 번역기가 실패하면 다른 번역기로 이어서 시도할지</summary>
-    public bool TranslateFallback { get; set; } = true;
+    /// <summary>
+    /// 번역기 우선순위(google / mymemory / gemini). 앞의 것부터 쓰고, 실패하면 다음 것으로 넘어간다.
+    /// 하나만 적으면 그 번역기만 쓴다.
+    /// </summary>
+    public List<string> TranslateOrder { get; set; } = [Translator.Google, Translator.MyMemory, Translator.Gemini];
 
     /// <summary>Gemini 번역에 쓰는 사용자 API 키. 비어 있으면 Gemini 를 쓰지 않는다</summary>
     public string GeminiApiKey { get; set; } = "";
@@ -193,7 +193,7 @@ internal sealed class AppConfig
     public void Normalize()
     {
         if (!ShowOriginal && !ShowTranslated) ShowTranslated = true;
-        TranslateEngine = Translator.IsEngine(TranslateEngine) ? TranslateEngine.ToLowerInvariant() : Translator.Google;
+        TranslateOrder = Translator.CleanOrder(TranslateOrder);
         GeminiApiKey = (GeminiApiKey ?? "").Trim();
         if (string.IsNullOrWhiteSpace(GeminiModel)) GeminiModel = Translator.DefaultGeminiModel;
         AutoCloseSeconds = Math.Clamp(AutoCloseSeconds, 0, 600);

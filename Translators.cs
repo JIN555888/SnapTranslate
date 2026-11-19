@@ -4,16 +4,16 @@ using System.Text.RegularExpressions;
 
 namespace SnapTranslate;
 
-/// <summary>어느 번역기를 쓸지와 예비 전환 여부</summary>
-internal sealed record TranslateOptions(string Engine, bool Fallback, string GeminiApiKey, string GeminiModel)
+/// <summary>번역기를 시도할 순서(우선순위)와 Gemini 설정</summary>
+internal sealed record TranslateOptions(IReadOnlyList<string> Order, string GeminiApiKey, string GeminiModel)
 {
-    public static readonly TranslateOptions Default = new(Translator.Google, false, "", Translator.DefaultGeminiModel);
+    public static readonly TranslateOptions Default = new([Translator.Google], "", Translator.DefaultGeminiModel);
 
     /// <summary>번역기에 요청을 보내기 직전에 불린다(번역기 코드, 앞서 실패한 번역기 코드 또는 null). 진행 표시용</summary>
     public Action<string, string?>? OnTry { get; init; }
 
     public static TranslateOptions From(AppConfig config) =>
-        new(config.TranslateEngine, config.TranslateFallback, config.GeminiApiKey, config.GeminiModel);
+        new(config.TranslateOrder.ToArray(), config.GeminiApiKey, config.GeminiModel);
 }
 
 /// <summary>번역기가 낸 오류. RateLimited 면 사용량 제한·차단이라 잠시 뒤로 미룬다</summary>
@@ -71,7 +71,7 @@ internal static class Translator
     /// <summary>
     /// source(auto 면 자동 감지) → target 으로 번역한다.
     /// altTarget 을 주면, 원문이 이미 target 언어일 때 altTarget 으로 번역한다. null 이면 target 그대로 쓴다.
-    /// options.Fallback 이 켜져 있으면 고른 번역기가 실패했을 때 다른 번역기로 이어서 시도한다.
+    /// options.Order 의 순서대로 시도하고, 실패하면 다음 순위 번역기로 넘어간다.
     /// </summary>
     public static async Task<TranslateOutput> TranslateAsync(string text, string source, string target,
         string? altTarget, TranslateOptions? options = null)
@@ -104,20 +104,24 @@ internal static class Translator
         throw new TranslateException(string.Join(" / ", errors));
     }
 
-    /// <summary>시도할 번역기 순서. 고른 것이 먼저이고, 방금 제한에 걸린 것은 뒤로 간다</summary>
+    /// <summary>올바른 번역기 이름만 남기고 겹친 것을 뺀다. 하나도 없으면 Google 번역 하나로 한다</summary>
+    public static List<string> CleanOrder(IEnumerable<string>? order)
+    {
+        var clean = (order ?? [])
+            .Where(IsEngine)
+            .Select(engine => engine.ToLowerInvariant())
+            .Distinct()
+            .ToList();
+        if (clean.Count == 0) clean.Add(Google);
+        return clean;
+    }
+
+    /// <summary>시도할 번역기 순서. 설정한 우선순위대로이고, 방금 제한에 걸린 것은 뒤로 간다</summary>
     private static List<string> EngineOrder(TranslateOptions options)
     {
-        string selected = IsEngine(options.Engine) ? options.Engine.ToLowerInvariant() : Google;
-        var order = new List<string> { selected };
-        if (!options.Fallback) return order;
-
-        foreach (string engine in AllEngines)
-        {
-            if (engine == selected) continue;
-            // 키가 없는 Gemini 는 예비로 쓸 수 없다
-            if (engine == Gemini && string.IsNullOrWhiteSpace(options.GeminiApiKey)) continue;
-            order.Add(engine);
-        }
+        var order = CleanOrder(options.Order);
+        // 키가 없는 Gemini 는 건너뛴다. 그것 하나뿐이면 남겨서 "키가 없음"을 알린다
+        if (order.Count > 1 && string.IsNullOrWhiteSpace(options.GeminiApiKey)) order.Remove(Gemini);
 
         DateTime now = DateTime.UtcNow;
         lock (BlockedUntil)

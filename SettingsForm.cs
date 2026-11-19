@@ -10,10 +10,13 @@ internal sealed class SettingsForm : Form
 {
     private static readonly LangItem[] Engines =
     [
-        new(Translator.Google, "Google 번역 (기본)"),
+        new(Translator.Google, "Google 번역"),
         new(Translator.MyMemory, "MyMemory"),
         new(Translator.Gemini, "Gemini (AI, API 키 필요)"),
     ];
+
+    // 2·3순위에서 고르는 "이 순위는 쓰지 않음"
+    private static readonly LangItem NoEngine = new("", "사용 안 함");
 
     private static readonly LangItem[] PositionModes =
     [
@@ -46,8 +49,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _keepFocus;
     private readonly CheckBox _startupNotice;
     private readonly Label _ocrInstalled;   // "읽을 수 있는 언어" 표시
-    private readonly ComboBox _engine;       // 번역기 고르기
-    private readonly CheckBox _fallback;     // 실패하면 다른 번역기로
+    private readonly ComboBox[] _engines;    // 번역기 우선순위(1·2·3순위)
     private readonly TextBox _geminiKey;     // Gemini API 키(가려서 표시)
     private readonly CheckBox _checkUpdate;
     private readonly Label _updateStatus;
@@ -105,7 +107,9 @@ internal sealed class SettingsForm : Form
         Icon = Theme.LoadAppIcon(new Size(32, 32));
         Font = new Font(Theme.FontName, 10f);
         AutoScaleMode = AutoScaleMode.Dpi;
-        FormBorderStyle = FormBorderStyle.Sizable;
+        // 크기는 고정한다(늘려도 쓸모가 없다). 미리보기를 숨기거나 보일 때만 프로그램이 너비를 바꾼다
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+        MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
@@ -148,9 +152,13 @@ internal sealed class SettingsForm : Form
         _startupNotice = CreateCheck("시작할 때 Windows 알림 표시");
 
         // ---- 번역기 ----
-        _engine = CreateCombo();
-        _engine.Items.AddRange(Engines);
-        _fallback = CreateCheck("실패하면 다른 번역기로 자동 전환");
+        _engines = new ComboBox[Engines.Length];
+        for (int i = 0; i < _engines.Length; i++)
+        {
+            _engines[i] = CreateCombo();
+            _engines[i].Items.AddRange(Engines);
+            if (i > 0) _engines[i].Items.Add(NoEngine);   // 1순위는 반드시 고른다
+        }
         _geminiKey = new TextBox
         {
             BackColor = Theme.Field,
@@ -204,6 +212,7 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "원문 언어", _source);
         AddHint(grid, "번역할 화면의 언어. 보통 \"자동 감지\"로 두세요");
         _ocrInstalled = InfoLabel(string.Join(", ", OcrService.InstalledLanguageNames()));
+        _ocrInstalled.MaximumSize = new Size(255, 0);   // 언어가 많으면 잘리지 않게 여러 줄로 넘긴다
         var installOcr = new Button { Text = "언어 추가 설치…" };
         Theme.StyleButton(installOcr, false);
         installOcr.Margin = new Padding(3, 4, 0, 4);
@@ -233,14 +242,16 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "알림", _startupNotice);
         AddHint(grid, "단축키 등록 실패 같은 경고는 꺼도 표시됩니다");
 
-        grid = NewPage("번역기", "번역에 쓸 서비스와 예비 전환");
-        AddRow(grid, "번역기", _engine);
+        grid = NewPage("번역기", "번역에 쓸 서비스와 우선순위");
+        for (int i = 0; i < _engines.Length; i++) AddRow(grid, $"{i + 1}순위", _engines[i]);
+        AddHint(grid, "1순위부터 쓰고, 실패하면 다음 순위로 넘어갑니다");
+        AddHint(grid, "한 번역기만 쓰려면 2·3순위를 \"사용 안 함\"으로 두세요");
+        AddHint(grid, "같은 번역기를 두 번 고르면 뒤의 것은 무시됩니다");
+        AddSeparator(grid);
         AddHint(grid, "Google 번역: 키 없이 사용. 많이 쓰면 잠시 막힐 수 있음");
         AddHint(grid, "MyMemory: 키 없이 사용. 하루 약 5,000자까지");
         AddHint(grid, "Gemini: AI 번역. 문맥·게임 용어에 강함. 무료 API 키 필요");
         AddHint(grid, "Gemini 응답: 보통 1~3초, 붐비면 최대 30초");
-        AddRow(grid, "", _fallback);
-        AddHint(grid, "켜면 고른 번역기가 막혔을 때 다른 번역기로 번역합니다");
         AddHint(grid, "인식한 글자는 번역한 서비스로 전송됩니다");
         AddSeparator(grid);
         AddRow(grid, "Gemini API 키", _geminiKey);
@@ -461,8 +472,9 @@ internal sealed class SettingsForm : Form
             _keepFocus.Checked = c.KeepFocusOnApp;
             _checkUpdate.Checked = c.CheckUpdateOnStart;
             _startupNotice.Checked = c.ShowStartupNotice;
-            _engine.SelectedItem = Engines.FirstOrDefault(e => e.Code.Equals(c.TranslateEngine, StringComparison.OrdinalIgnoreCase)) ?? Engines[0];
-            _fallback.Checked = c.TranslateFallback;
+            var order = Translator.CleanOrder(c.TranslateOrder);
+            for (int i = 0; i < _engines.Length; i++)
+                _engines[i].SelectedItem = i < order.Count ? Engines.First(e => e.Code == order[i]) : NoEngine;
             _geminiKey.Text = c.GeminiApiKey;
 
             _opacity.Value = c.Opacity;
@@ -514,8 +526,7 @@ internal sealed class SettingsForm : Form
         c.KeepFocusOnApp = _keepFocus.Checked;
         c.CheckUpdateOnStart = _checkUpdate.Checked;
         c.ShowStartupNotice = _startupNotice.Checked;
-        c.TranslateEngine = (_engine.SelectedItem as LangItem)?.Code ?? Translator.Google;
-        c.TranslateFallback = _fallback.Checked;
+        c.TranslateOrder = Translator.CleanOrder(_engines.Select(combo => (combo.SelectedItem as LangItem)?.Code ?? ""));
         c.GeminiApiKey = _geminiKey.Text.Trim();
 
         c.Opacity = (int)_opacity.Value;

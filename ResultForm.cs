@@ -188,7 +188,13 @@ internal sealed class ResultForm : Form
         _floatClose.BringToFront();
 
         // 번역기 이름. 아래 줄을 숨겨도 보이게, 닫기 단추처럼 창 위에 직접 올린다
-        _engineLabel = new Label { AutoSize = true, Font = new Font(Theme.FontName, 7.5f), Visible = false };
+        _engineLabel = new Label
+        {
+            AutoSize = true,
+            Font = new Font(Theme.FontName, 8.5f, FontStyle.Bold),
+            Padding = new Padding(6, 2, 6, 2),
+            Visible = false,
+        };
         Controls.Add(_engineLabel);
         _split.SplitterMoved += (_, _) => PlaceEngineLabel();
         _split.SizeChanged += (_, _) => PlaceEngineLabel();
@@ -232,7 +238,7 @@ internal sealed class ResultForm : Form
     private void PlaceEngineLabel()
     {
         if (_engineLabel == null) return;   // 생성자 도중에도 불린다
-        _engineLabel.Text = _engineName;
+        _engineLabel.Text = "번역기 · " + _engineName;
         _engineLabel.Visible = _config.ShowEngine && _engineName.Length > 0;
         if (!_engineLabel.Visible) return;
 
@@ -596,9 +602,9 @@ internal sealed class ResultForm : Form
         PerformLayout();
         _root.PerformLayout();
 
-        // 번역기 이름은 칸 위에 놓이므로 칸 배경색에 맞춘다. 칸 크기가 정해진 뒤에 자리를 잡는다
-        _engineLabel.BackColor = card;
-        _engineLabel.ForeColor = label;
+        // 번역기 이름은 한눈에 보이게 강조색 배지로 그린다. 칸 크기가 정해진 뒤에 자리를 잡는다
+        _engineLabel.BackColor = accent;
+        _engineLabel.ForeColor = Theme.ContrastText(accent);
         PlaceEngineLabel();
     }
 
