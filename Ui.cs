@@ -507,7 +507,7 @@ internal sealed class SlimSlider : Control
     }
 }
 
-/// <summary>진행 중임을 알리는 점 세 개. 지금 차례인 점만 강조색으로 칠한다</summary>
+/// <summary>진행 중임을 알리는 점 세 개. 지금 차례인 점만 제 색(노랑·빨강·초록)으로 칠한다</summary>
 internal sealed class BusyDots : Control
 {
     private int _frame;
@@ -526,8 +526,13 @@ internal sealed class BusyDots : Control
         set { _frame = value; Invalidate(); }
     }
 
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public Color ActiveColor { get; set; } = Theme.Accent;
+    // 점마다 켜질 때의 색: 노랑 → 빨강 → 초록 순으로 돌아가며 켜진다
+    private static readonly Color[] ActiveColors =
+    [
+        Color.FromArgb(255, 204, 64),
+        Color.FromArgb(240, 84, 84),
+        Color.FromArgb(76, 200, 120),
+    ];
 
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Color IdleColor { get; set; } = Theme.Field;
@@ -548,8 +553,40 @@ internal sealed class BusyDots : Control
         int y = (Height - dot) / 2 + 1;
         for (int i = 0; i < 3; i++)
         {
-            using var brush = new SolidBrush(i == _frame ? ActiveColor : IdleColor);
+            using var brush = new SolidBrush(i == _frame ? ActiveColors[i] : IdleColor);
             e.Graphics.FillEllipse(brush, 1 + i * (dot + gap), y, dot, dot);
         }
+    }
+}
+
+/// <summary>창을 끌어 옮기는 동그란 손잡이. 제목 줄을 숨겼을 때 창 왼쪽 위에 놓는다</summary>
+internal sealed class DragDot : Control
+{
+    private bool _hover;
+
+    public DragDot()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        TabStop = false;
+        Cursor = Cursors.SizeAll;
+        Size = new Size(22, 22);
+    }
+
+    // 어두운 창에서도 밝은 창에서도 눈에 띄게 노랑으로 고정한다(마우스를 올리면 더 밝아진다)
+    private static readonly Color DotColor = Color.FromArgb(255, 204, 64);
+    private static readonly Color HoverColor = Color.FromArgb(255, 226, 130);
+
+    protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hover = true; Invalidate(); }
+    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hover = false; Invalidate(); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.Clear(BackColor);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        // 누를 자리는 넉넉하게 두고, 그 안에 조금 작은 원을 그린다
+        int size = Math.Min(Width, Height) - 5;
+        var circle = new Rectangle((Width - size) / 2, (Height - size) / 2, size, size);
+        using var brush = new SolidBrush(_hover ? HoverColor : DotColor);
+        e.Graphics.FillEllipse(brush, circle);
     }
 }

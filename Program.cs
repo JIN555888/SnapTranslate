@@ -76,9 +76,9 @@ internal sealed class AppConfig
 
     /// <summary>
     /// 번역기 우선순위(google / mymemory / gemini). 앞의 것부터 쓰고, 실패하면 다음 것으로 넘어간다.
-    /// 칸은 1·2·3순위이고 빈 칸("")은 "사용 안 함"이다. 기본은 Google 번역, 없음, Gemini(키를 넣었을 때만 쓰임).
+    /// 칸은 1·2·3순위이고 빈 칸("")은 "사용 안 함"이다. 기본은 Google 번역, MyMemory, Gemini(키를 넣었을 때만 쓰임).
     /// </summary>
-    public List<string> TranslateOrder { get; set; } = [Translator.Google, "", Translator.Gemini];
+    public List<string> TranslateOrder { get; set; } = [Translator.Google, Translator.MyMemory, Translator.Gemini];
 
     /// <summary>Gemini 번역에 쓰는 사용자 API 키. 비어 있으면 Gemini 를 쓰지 않는다</summary>
     public string GeminiApiKey { get; set; } = "";

@@ -15,6 +15,7 @@ internal sealed class ResultForm : Form
     private Rectangle _anchor;
     private readonly bool _keepFocus;      // 창이 포커스를 가져가지 않는 모드(창을 만들 때 정해지고 바뀌지 않는다)
     private readonly Button _floatClose;  // 제목 줄을 숨겼을 때 내용 위에 겹쳐 보이는 닫기 단추
+    private readonly DragDot _dragDot;    // 제목 줄을 숨겼을 때 창을 끌어 옮기는 동그란 손잡이(왼쪽 위)
     private readonly BusyDots _busyDots;  // "…중" 안내 뒤에서 움직이는 색 점
     private readonly Label _engineLabel;  // 어느 번역기로 번역했는지. 내용 오른쪽 아래에 겹쳐 보인다
     private string _engineName = "";      // 마지막 번역에 쓴 번역기 이름(번역 전·실패면 빈 값)
@@ -188,6 +189,11 @@ internal sealed class ResultForm : Form
         Controls.Add(_floatClose);
         _floatClose.BringToFront();
 
+        // 제목 줄이 없으면 끌 곳이 없으므로, 왼쪽 위 구석에 끌어 옮기는 손잡이를 둔다
+        _dragDot = new DragDot { Visible = false };
+        Controls.Add(_dragDot);
+        _dragDot.BringToFront();
+
         // 번역기 이름. 아래 줄을 숨겨도 보이게, 닫기 단추처럼 창 위에 직접 올린다
         _engineLabel = new Label
         {
@@ -236,6 +242,8 @@ internal sealed class ResultForm : Form
     {
         _floatClose.Location = new Point(ClientSize.Width - _floatClose.Width - 2, 2);
         _floatClose.BringToFront();
+        _dragDot.Location = new Point(2, 2);
+        _dragDot.BringToFront();
     }
 
     /// <summary>번역기 이름을 내용(원문·번역 칸) 오른쪽 아래 구석에 놓는다. 번역 전이거나 옵션이 꺼져 있으면 숨긴다</summary>
@@ -285,8 +293,8 @@ internal sealed class ResultForm : Form
     /// </summary>
     private void ShowNote(string text) => ShowNote(text, false);
 
-    // 진행 중 표시의 점이 강조되는 순서(왼쪽 → 오른쪽 → 다시 왼쪽). 멈춘 것이 아니라 일하는 중임을 보인다
-    private static readonly int[] BusySteps = [0, 1, 2, 1];
+    // 진행 중 표시의 점이 켜지는 순서(노랑 → 빨강 → 초록, 다시 처음으로). 멈춘 것이 아니라 일하는 중임을 보인다
+    private static readonly int[] BusySteps = [0, 1, 2];
     private readonly System.Windows.Forms.Timer _busyTimer = new() { Interval = 300 };
     private int _busyStep;
 
@@ -335,7 +343,6 @@ internal sealed class ResultForm : Form
         _busyDots.Size = size;
         _busyDots.Location = new Point(origin.X + charSize.Width + size.Height / 3, origin.Y);
         _busyDots.BackColor = Theme.ParseColor(_config.CardColor, Theme.Card);
-        _busyDots.ActiveColor = Theme.ParseColor(_config.AccentColor, Theme.Accent);
         _busyDots.IdleColor = Theme.ParseColor(_config.FieldColor, Theme.Field);
         _busyDots.Visible = true;
         _busyDots.BringToFront();
@@ -376,6 +383,7 @@ internal sealed class ResultForm : Form
     {
         _close.Click += (_, _) => Close();
         _floatClose.Click += (_, _) => Close();
+        _dragDot.MouseDown += (_, e) => { if (e.Button == MouseButtons.Left) Theme.DragWindow(this); };
         _busyTimer.Tick += (_, _) => OnBusyTick();
         _settings.Click += (_, _) => openSettings();
 
@@ -621,6 +629,8 @@ internal sealed class ResultForm : Form
         _floatClose.Visible = !_config.ShowTitleBar;
         _floatClose.BackColor = back;   // 창 구석(바깥 여백) 위에 놓이므로 창 배경색에 맞춘다
         _floatClose.ForeColor = label;
+        _dragDot.Visible = !_config.ShowTitleBar;
+        _dragDot.BackColor = back;
         PlaceFloatClose();
         _floatClose.BringToFront();
         if (_closeMenuItem != null) _closeMenuItem.Text = _config.CloseOnEsc ? "닫기 (Esc)" : "닫기";
