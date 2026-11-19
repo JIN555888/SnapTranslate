@@ -788,8 +788,8 @@ internal sealed class ResultForm : Form
         try
         {
             var translateTimer = System.Diagnostics.Stopwatch.StartNew();
-            var result = await Translator.TranslateAsync(text, source, target, alt);
-            DebugLog.Write($"번역 {translateTimer.ElapsedMilliseconds}ms 글자수={result.Text.Length} 맨 앞 창: {DebugLog.Foreground()}");
+            var result = await Translator.TranslateAsync(text, source, target, alt, TranslateOptions.From(_config));
+            DebugLog.Write($"번역 {translateTimer.ElapsedMilliseconds}ms 글자수={result.Text.Length} 번역기={result.Engine} 맨 앞 창: {DebugLog.Foreground()}");
             if (IsDisposed || generation != _generation) return;
 
             ShowTranslation(result.Text);
@@ -802,7 +802,11 @@ internal sealed class ResultForm : Form
             string from = source == "auto" && result.SourceLang.Length > 0
                 ? $"{Theme.LangName(result.SourceLang)}(감지)"
                 : Theme.LangName(source);
-            _status.Text = $"{from} → {Theme.LangName(result.TargetLang)}{note}";
+            // 고른 번역기가 아닌 예비 번역기로 번역됐으면 어느 것인지 알린다
+            string via = result.Engine.Length > 0 && !result.Engine.Equals(_config.TranslateEngine, StringComparison.OrdinalIgnoreCase)
+                ? $" · {Translator.EngineName(result.Engine)}"
+                : "";
+            _status.Text = $"{from} → {Theme.LangName(result.TargetLang)}{via}{note}";
             if (_config.CopyTranslation) CopyTranslation();
             ArmAutoClose();
         }

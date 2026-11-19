@@ -61,6 +61,18 @@ internal sealed class AppConfig
     /// <summary>원문이 이미 TargetLang 이면 이 언어로 번역한다</summary>
     public string AltTargetLang { get; set; } = "en";
 
+    /// <summary>번역기: google(기본) / mymemory / gemini</summary>
+    public string TranslateEngine { get; set; } = Translator.Google;
+
+    /// <summary>고른 번역기가 실패하면 다른 번역기로 이어서 시도할지</summary>
+    public bool TranslateFallback { get; set; } = true;
+
+    /// <summary>Gemini 번역에 쓰는 사용자 API 키. 비어 있으면 Gemini 를 쓰지 않는다</summary>
+    public string GeminiApiKey { get; set; } = "";
+
+    /// <summary>Gemini 모델 이름. 보통 바꿀 일이 없다</summary>
+    public string GeminiModel { get; set; } = Translator.DefaultGeminiModel;
+
     /// <summary>번역이 끝나면 번역문을 클립보드에 자동 복사</summary>
     public bool CopyTranslation { get; set; } = false;
 
@@ -174,6 +186,9 @@ internal sealed class AppConfig
     public void Normalize()
     {
         if (!ShowOriginal && !ShowTranslated) ShowTranslated = true;
+        TranslateEngine = Translator.IsEngine(TranslateEngine) ? TranslateEngine.ToLowerInvariant() : Translator.Google;
+        GeminiApiKey = (GeminiApiKey ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(GeminiModel)) GeminiModel = Translator.DefaultGeminiModel;
         AutoCloseSeconds = Math.Clamp(AutoCloseSeconds, 0, 600);
         OriginalFontSize = Math.Clamp(OriginalFontSize, 6, 40);
         TranslatedFontSize = Math.Clamp(TranslatedFontSize, 6, 40);
@@ -721,12 +736,21 @@ internal static class SelfTest
 
             var config = new AppConfig();
             // UI 스레드 동기화 컨텍스트와 얽히지 않게 작업 스레드에서 돌린다
-            var (ocr, translated) = Task.Run(async () =>
+            OcrOutput ocr = Task.Run(() => OcrService.RecognizeAsync(bmp, [])).GetAwaiter().GetResult();
+            // 번역 요청은 여기 한 번만 보낸다(점검을 여러 번 돌려도 번역 서버 사용량 제한에 걸리지 않게)
+            string translatedLine;
+            bool translateOk = true;
+            try
             {
-                var o = await OcrService.RecognizeAsync(bmp, []);
-                var t = await Translator.TranslateAsync(o.Text, config.SourceLang, config.TargetLang, config.AltTargetLang);
-                return (o, t);
-            }).GetAwaiter().GetResult();
+                var options = TranslateOptions.From(config);
+                var t = Task.Run(() => Translator.TranslateAsync(ocr.Text, config.SourceLang, config.TargetLang, config.AltTargetLang, options)).GetAwaiter().GetResult();
+                translatedLine = $"번역기: {Translator.EngineName(t.Engine)}\r\n감지 언어: {t.SourceLang}\r\n번역: {t.Text}";
+            }
+            catch (Exception ex)
+            {
+                translateOk = false;
+                translatedLine = "번역 실패: " + ex.Message;
+            }
             UpdateResult update = Task.Run(UpdateService.CheckAsync).GetAwaiter().GetResult();
 
             // 한글 그림은 한국어 엔진이, 영문 그림은 영어 엔진이 골라지는지(자동 감지) 확인한다
@@ -761,14 +785,7 @@ internal static class SelfTest
                     g.DrawString(text, font, Brushes.Black, 20, 20);
                 }
                 OcrOutput found = Task.Run(() => OcrService.RecognizeAsync(image, [])).GetAwaiter().GetResult();
-                // 번역기의 언어 자동 감지까지 맞는지 본다
-                string translatedSample = "";
-                if (found.Text.Length > 0)
-                {
-                    var auto = Task.Run(() => Translator.TranslateAsync(found.Text, "auto", config.TargetLang, null)).GetAwaiter().GetResult();
-                    translatedSample = $" ⇒ (번역기 감지 {auto.SourceLang}) {auto.Text}";
-                }
-                detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}{translatedSample}");
+                detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}");
             }
 
             File.WriteAllText(outputPath,
@@ -776,8 +793,8 @@ internal static class SelfTest
                 $"읽을 수 있는 언어: {string.Join(", ", OcrService.InstalledLanguageNames())}\r\n" +
                 $"한글 그림 → 엔진 {koreanOcr.Language}: {koreanOcr.Text}\r\n" +
                 string.Join("\r\n", detectLines) + "\r\n" +
-                $"OCR 언어: {ocr.Language}\r\nOCR 결과: {ocr.Text}\r\n감지 언어: {translated.SourceLang}\r\n번역: {translated.Text}\r\n");
-            return 0;
+                $"OCR 언어: {ocr.Language}\r\nOCR 결과: {ocr.Text}\r\n{translatedLine}\r\n");
+            return translateOk ? 0 : 2;   // 2 = 번역만 실패(글자 인식 등 나머지는 통과)
         }
         catch (Exception ex)
         {

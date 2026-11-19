@@ -8,6 +8,13 @@ namespace SnapTranslate;
 /// </summary>
 internal sealed class SettingsForm : Form
 {
+    private static readonly LangItem[] Engines =
+    [
+        new(Translator.Google, "Google 번역 (기본)"),
+        new(Translator.MyMemory, "MyMemory"),
+        new(Translator.Gemini, "Gemini (AI, API 키 필요)"),
+    ];
+
     private static readonly LangItem[] PositionModes =
     [
         new("Selection", "선택한 영역 근처"),
@@ -39,6 +46,9 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _keepFocus;
     private readonly CheckBox _startupNotice;
     private readonly Label _ocrInstalled;   // "읽을 수 있는 언어" 표시
+    private readonly ComboBox _engine;       // 번역기 고르기
+    private readonly CheckBox _fallback;     // 실패하면 다른 번역기로
+    private readonly TextBox _geminiKey;     // Gemini API 키(가려서 표시)
     private readonly CheckBox _checkUpdate;
     private readonly Label _updateStatus;
 
@@ -133,6 +143,19 @@ internal sealed class SettingsForm : Form
         _keepFocus = CreateCheck("쓰던 프로그램의 포커스 유지 (게임 권장)");
         _startupNotice = CreateCheck("시작할 때 Windows 알림 표시");
 
+        // ---- 번역기 ----
+        _engine = CreateCombo();
+        _engine.Items.AddRange(Engines);
+        _fallback = CreateCheck("실패하면 다른 번역기로 자동 전환");
+        _geminiKey = new TextBox
+        {
+            BackColor = Theme.Field,
+            ForeColor = Theme.Text,
+            BorderStyle = BorderStyle.FixedSingle,
+            Width = 300,
+            UseSystemPasswordChar = true,   // 화면을 공유하거나 찍을 때 키가 보이지 않게 가린다
+        };
+
         // ---- 크기 ----
         _opacity = new ValueSlider(30, 100, 1, "%", Theme.Card);
         // 크기는 10 단위, 글자 크기는 0.5 단위로 움직인다
@@ -205,6 +228,23 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "알림", _startupNotice);
         AddHint(grid, "단축키 등록 실패 같은 경고는 꺼도 표시됩니다");
 
+        grid = NewPage("번역기", "번역에 쓸 서비스와 예비 전환");
+        AddRow(grid, "번역기", _engine);
+        AddHint(grid, "Google 번역: 키 없이 사용. 많이 쓰면 잠시 막힐 수 있음");
+        AddHint(grid, "MyMemory: 키 없이 사용. 하루 약 5,000자까지");
+        AddHint(grid, "Gemini: AI 번역. 문맥·게임 용어에 강함. 무료 API 키 필요");
+        AddRow(grid, "", _fallback);
+        AddHint(grid, "켜면 고른 번역기가 막혔을 때 다른 번역기로 번역합니다");
+        AddHint(grid, "인식한 글자는 번역한 서비스로 전송됩니다");
+        AddSeparator(grid);
+        AddRow(grid, "Gemini API 키", _geminiKey);
+        AddRow(grid, "", LinkButton("키 발급 페이지 열기", Translator.GeminiKeyUrl, false));
+        AddHint(grid, "1. 단추를 눌러 Google 계정으로 로그인");
+        AddHint(grid, "2. \"Create API key\" (API 키 만들기)를 누름");
+        AddHint(grid, "3. 만들어진 키를 복사해 위 칸에 붙여 넣고 저장");
+        AddHint(grid, "무료 등급에는 하루 사용량 한도가 있습니다");
+        AddHint(grid, "키는 이 PC 의 config.json 에만 저장됩니다");
+
         grid = NewPage("크기", "결과 창의 불투명도와 가로·세로 크기");
         AddRow(grid, "불투명도", _opacity);
         AddHint(grid, "불투명도는 미리보기에 반영되지 않습니다(실제 결과 창에만 적용)");
@@ -259,7 +299,7 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "저작권", InfoLabel(AppInfo.Copyright));
         AddRow(grid, "라이선스", InfoLabel(AppInfo.License));
         AddRow(grid, "글자 인식", InfoLabel("Windows 내장 OCR (PC 안에서 처리)"));
-        AddRow(grid, "번역", InfoLabel("Google 번역 (인식한 글자가 전송됨)"));
+        AddRow(grid, "번역", InfoLabel("Google 번역 · MyMemory · Gemini 중 선택 (인식한 글자가 전송됨)"));
         AddRow(grid, "오픈소스", InfoLabel(".NET 9, Windows Forms, C#/WinRT (MIT)"));
         AddSeparator(grid);
         // 주소를 글자로 보이지 않고 단추로 연다
@@ -387,6 +427,9 @@ internal sealed class SettingsForm : Form
             _keepFocus.Checked = c.KeepFocusOnApp;
             _checkUpdate.Checked = c.CheckUpdateOnStart;
             _startupNotice.Checked = c.ShowStartupNotice;
+            _engine.SelectedItem = Engines.FirstOrDefault(e => e.Code.Equals(c.TranslateEngine, StringComparison.OrdinalIgnoreCase)) ?? Engines[0];
+            _fallback.Checked = c.TranslateFallback;
+            _geminiKey.Text = c.GeminiApiKey;
 
             _opacity.Value = c.Opacity;
             _width.Value = c.WindowWidth;
@@ -436,6 +479,9 @@ internal sealed class SettingsForm : Form
         c.KeepFocusOnApp = _keepFocus.Checked;
         c.CheckUpdateOnStart = _checkUpdate.Checked;
         c.ShowStartupNotice = _startupNotice.Checked;
+        c.TranslateEngine = (_engine.SelectedItem as LangItem)?.Code ?? Translator.Google;
+        c.TranslateFallback = _fallback.Checked;
+        c.GeminiApiKey = _geminiKey.Text.Trim();
 
         c.Opacity = (int)_opacity.Value;
         c.WindowWidth = (int)_width.Value;
