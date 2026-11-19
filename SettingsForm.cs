@@ -37,6 +37,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _reuseWindow;
     private readonly CheckBox _closeOnEsc;
     private readonly CheckBox _startupNotice;
+    private readonly Label _ocrInstalled;   // "읽을 수 있는 언어" 표시
     private readonly CheckBox _checkUpdate;
     private readonly Label _updateStatus;
 
@@ -133,9 +134,9 @@ internal sealed class SettingsForm : Form
         // ---- 크기 ----
         _opacity = new ValueSlider(30, 100, 1, "%", Theme.Card);
         // 크기는 10 단위, 글자 크기는 0.5 단위로 움직인다
-        _width = new ValueSlider(400, 2000, 10, " px", Theme.Card);
-        _originalHeight = new ValueSlider(50, 1000, 10, " px", Theme.Card);
-        _translatedHeight = new ValueSlider(60, 1200, 10, " px", Theme.Card);
+        _width = new ValueSlider(AppConfig.MinWidth, 2000, 10, " px", Theme.Card);
+        _originalHeight = new ValueSlider(AppConfig.MinPaneHeight, 1000, 10, " px", Theme.Card);
+        _translatedHeight = new ValueSlider(AppConfig.MinPaneHeight, 1200, 10, " px", Theme.Card);
 
         // ---- 글자 ----
         _fontName = CreateCombo();
@@ -171,9 +172,16 @@ internal sealed class SettingsForm : Form
         AddHint(grid, "칸을 누른 뒤 원하는 키 조합을 누르세요");
         AddSeparator(grid);
         AddRow(grid, "원문 언어", _source);
-        AddHint(grid, "보통 \"자동 감지\"로 두세요. 번역할 화면의 언어를 고르는 칸입니다");
-        AddRow(grid, "읽을 수 있는 언어", InfoLabel(string.Join(", ", OcrService.InstalledLanguageNames())));
-        AddHint(grid, "여기 없는 언어(중국어·일본어·러시아어 등)는 Windows 에 추가해야 읽습니다");
+        AddHint(grid, "번역할 화면의 언어. 보통 \"자동 감지\"로 두세요");
+        _ocrInstalled = InfoLabel(string.Join(", ", OcrService.InstalledLanguageNames()));
+        var installOcr = new Button { Text = "언어 추가 설치…" };
+        Theme.StyleButton(installOcr, false);
+        installOcr.Margin = new Padding(3, 4, 0, 4);
+        installOcr.Click += (_, _) => ShowOcrInstallMenu(installOcr);
+        AddRow(grid, "읽을 수 있는 언어", _ocrInstalled);
+        AddRow(grid, "", installOcr);
+        AddHint(grid, "중국어·일본어·러시아어 등은 설치해야 읽습니다");
+        AddHint(grid, "필리핀어·베트남어 등은 영어 인식으로 읽습니다");
         AddRow(grid, "번역 언어", _target);
         AddRow(grid, "원문이 번역 언어일 때", _altTarget);
         AddSeparator(grid);
@@ -185,7 +193,6 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "결과 창", _reuseWindow);
         AddHint(grid, "끄면 캡처할 때마다 새 창이 열립니다");
         AddRow(grid, "", _closeOnEsc);
-        AddHint(grid, "켜면 결과 창 제목 자리에 \"Esc 닫기\"가 표시됩니다");
         AddRow(grid, "자동 닫힘(초)", _autoClose);
         AddHint(grid, "0 = 닫지 않음. 마우스가 창 위에 있으면 안 닫힘");
         AddRow(grid, "", _autoCopy);
@@ -460,6 +467,41 @@ internal sealed class SettingsForm : Form
             check.CheckedChanged += (_, _) => OnChanged();
         foreach (var color in new[] { _originalColor, _translatedColor, _backgroundColor, _cardColor, _accentColor, _labelColor, _fieldColor })
             color.BackColorChanged += (_, _) => OnChanged();
+    }
+
+    /// <summary>아직 설치되지 않은 OCR 언어를 메뉴로 보여 주고, 고르면 설치를 시작한다</summary>
+    private void ShowOcrInstallMenu(Control anchor)
+    {
+        var menu = new ContextMenuStrip();
+        foreach (var (check, capability, name) in OcrInstaller.Languages)
+        {
+            if (OcrService.IsAvailable(check)) continue;
+            menu.Items.Add(name, null, async (_, _) => await InstallOcrAsync(capability, name));
+        }
+        if (menu.Items.Count == 0)
+            menu.Items.Add("설치할 수 있는 언어가 모두 설치돼 있습니다").Enabled = false;
+        menu.Show(anchor, new Point(0, anchor.Height));
+    }
+
+    /// <summary>관리자 권한 창에서 설치를 실행하고, 그 창이 닫히면 "읽을 수 있는 언어"를 다시 읽어 보여 준다</summary>
+    private async Task InstallOcrAsync(string capability, string name)
+    {
+        var answer = MessageBox.Show(this,
+            $"{name} 글자 인식 기능을 Windows 에 설치할까요?\n\n관리자 권한 확인 창이 뜨고, 설치 창(PowerShell)이 열립니다.",
+            AppInfo.Name, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (answer != DialogResult.Yes) return;
+
+        using var process = OcrInstaller.Start(capability, name);
+        if (process == null)
+        {
+            _message.Text = "설치를 취소했습니다(관리자 권한 필요).";
+            return;
+        }
+        _message.Text = $"{name} 설치 창이 닫힐 때까지 기다리는 중…";
+        await process.WaitForExitAsync();
+        if (IsDisposed) return;
+        _ocrInstalled.Text = string.Join(", ", OcrService.InstalledLanguageNames());
+        _message.Text = "설치 창이 닫혔습니다. 목록에 안 보이면 프로그램을 다시 시작하세요.";
     }
 
     /// <summary>화면에서 결과 창이 뜰 자리를 마우스로 고른다. 고르면 창 위치가 "직접 지정"으로 바뀐다</summary>

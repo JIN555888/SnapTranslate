@@ -156,6 +156,10 @@ internal sealed class AppConfig
     public bool ShowOriginal { get; set; } = true;
     public bool ShowTranslated { get; set; } = true;
 
+    /// <summary>결과 창 가로와 원문·번역 칸 세로의 최소 크기(100% 배율 기준 픽셀). 작게 쓰고 싶은 경우를 위해 낮게 둔다</summary>
+    public const int MinWidth = 120;
+    public const int MinPaneHeight = 20;
+
     /// <summary>값이 허용 범위를 벗어나면 범위 안으로 맞춘다</summary>
     public void Normalize()
     {
@@ -164,9 +168,9 @@ internal sealed class AppConfig
         OriginalFontSize = Math.Clamp(OriginalFontSize, 6, 40);
         TranslatedFontSize = Math.Clamp(TranslatedFontSize, 6, 40);
         Opacity = Math.Clamp(Opacity, 30, 100);
-        WindowWidth = Math.Clamp(WindowWidth, 400, 2000);
-        OriginalHeight = Math.Clamp(OriginalHeight, 50, 1000);
-        TranslatedHeight = Math.Clamp(TranslatedHeight, 60, 1200);
+        WindowWidth = Math.Clamp(WindowWidth, MinWidth, 2000);
+        OriginalHeight = Math.Clamp(OriginalHeight, MinPaneHeight, 1000);
+        TranslatedHeight = Math.Clamp(TranslatedHeight, MinPaneHeight, 1200);
     }
 
     public void Save()
@@ -507,7 +511,9 @@ internal static class ShotTest
             var compact = new AppConfig { ShowTitleBar = false, ShowLanguageRow = false, ShowBottomBar = false, ShowCaptions = false };
             var translatedOnly = new AppConfig { ShowOriginal = false };
             var originalOnly = new AppConfig { ShowTranslated = false, ShowBottomBar = false };
-            foreach (var (name, cfg) in new[] { ("result.png", config), ("result-compact.png", compact), ("result-translated-only.png", translatedOnly), ("result-original-only.png", originalOnly) })
+            // 최소 크기 근처의 아주 작은 창
+            var tiny = new AppConfig { WindowWidth = 160, OriginalHeight = 20, TranslatedHeight = 40, ShowTitleBar = false, ShowLanguageRow = false, ShowBottomBar = false, ShowCaptions = false };
+            foreach (var (name, cfg) in new[] { ("result.png", config), ("result-compact.png", compact), ("result-translated-only.png", translatedOnly), ("result-original-only.png", originalOnly), ("result-tiny.png", tiny) })
             {
                 using var result = new ResultForm(cfg, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { Opacity = 0 };
                 // 점검 도중 창이 저절로 닫히면 어디서 닫았는지 남긴다

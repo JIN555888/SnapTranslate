@@ -14,7 +14,6 @@ internal sealed class ResultForm : Form
     private readonly bool _preview;
     private Rectangle _anchor;
     private readonly Font _titleFont = new(Theme.FontName, 9f, FontStyle.Bold);
-    private readonly Font _hintFont = new(Theme.FontName, 8f);
     private ToolStripItem? _closeMenuItem;   // 우클릭 메뉴의 닫기 항목(Esc 설정에 따라 문구가 바뀐다)
 
     private readonly TableLayoutPanel _root;
@@ -69,7 +68,7 @@ internal sealed class ResultForm : Form
         ForeColor = Theme.Text;
         Padding = new Padding(ResizeGrip);   // 가장자리를 비워 두어 크기 조절 손잡이로 쓴다
         ClientSize = new Size(560, 400);
-        MinimumSize = new Size(200, 120);
+        MinimumSize = new Size(80, 40);
 
         // ---- 제목 줄 ----
         _title = new Label
@@ -120,8 +119,8 @@ internal sealed class ResultForm : Form
             Orientation = Orientation.Horizontal,
             FixedPanel = FixedPanel.Panel1,   // 창 세로를 늘리면 번역 칸이 늘어난다
             SplitterWidth = 6,
-            Panel1MinSize = 50,
-            Panel2MinSize = 60,
+            Panel1MinSize = AppConfig.MinPaneHeight,
+            Panel2MinSize = AppConfig.MinPaneHeight,
             Margin = Padding.Empty,
             TabStop = false,
             IsSplitterFixed = preview,
@@ -418,11 +417,7 @@ internal sealed class ResultForm : Form
         // 표시 항목
         // 제목 줄을 숨겨도 닫을 수 있게, 오른쪽 위 닫기 단추만 있는 얇은 줄은 남긴다(빈 곳을 끌면 창 이동)
         SetRow(0, _titleBar, true, _config.ShowTitleBar ? _rowHeights[0] : (float)Math.Round(_rowHeights[0] * 0.7f));
-        // Esc 로 닫을 수 있다는 것을 제목 자리에 알려 준다(Esc 닫기를 끄면 표시하지 않는다)
-        string escHint = _config.CloseOnEsc ? "Esc 닫기" : "";
-        _title.Text = !_config.ShowTitleBar ? escHint
-            : escHint.Length > 0 ? "SnapTranslate   ·   " + escHint : "SnapTranslate";
-        _title.Font = _config.ShowTitleBar ? _titleFont : _hintFont;
+        _title.Text = _config.ShowTitleBar ? "SnapTranslate" : "";
         _settings.Visible = _config.ShowTitleBar;
         if (_closeMenuItem != null) _closeMenuItem.Text = _config.CloseOnEsc ? "닫기 (Esc)" : "닫기";
         SetRow(1, _langRow, _config.ShowLanguageRow, _rowHeights[1]);
@@ -745,7 +740,6 @@ internal sealed class ResultForm : Form
         if (disposing)
         {
             _titleFont.Dispose();
-            _hintFont.Dispose();
             _closeTimer.Dispose();
             _crop?.Dispose();
         }
