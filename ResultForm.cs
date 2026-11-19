@@ -191,6 +191,8 @@ internal sealed class ResultForm : Form
         _engineLabel = new Label { AutoSize = true, Font = new Font(Theme.FontName, 7.5f), Visible = false };
         Controls.Add(_engineLabel);
         _split.SplitterMoved += (_, _) => PlaceEngineLabel();
+        _split.SizeChanged += (_, _) => PlaceEngineLabel();
+        VisibleChanged += (_, _) => PlaceEngineLabel();
 
         if (preview)
         {

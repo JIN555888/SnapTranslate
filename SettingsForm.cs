@@ -90,6 +90,9 @@ internal sealed class SettingsForm : Form
 
     private readonly Label _message;
     private readonly Panel _previewHost;
+    private readonly Panel _previewArea;        // 미리보기 전체(제목 + 그림). 숨길 수 있다
+    private readonly Button _previewToggle;     // 미리보기 숨기기/보이기
+    private int _widthWithPreview;              // 미리보기를 보일 때의 창 안쪽 너비
     private ResultForm? _preview;
 
     public SettingsForm(AppConfig config, Func<string, bool> tryRegisterHotkey)
@@ -110,7 +113,7 @@ internal sealed class SettingsForm : Form
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
         ClientSize = new Size(1290, 600);
-        MinimumSize = new Size(700, 400);
+        MinimumSize = new Size(600, 400);
 
         // ---- 동작 ----
         _hotkey = new TextBox
@@ -235,7 +238,7 @@ internal sealed class SettingsForm : Form
         AddHint(grid, "Google 번역: 키 없이 사용. 많이 쓰면 잠시 막힐 수 있음");
         AddHint(grid, "MyMemory: 키 없이 사용. 하루 약 5,000자까지");
         AddHint(grid, "Gemini: AI 번역. 문맥·게임 용어에 강함. 무료 API 키 필요");
-        AddHint(grid, "Gemini 는 보통 1~3초, 붐빌 때는 30초까지 걸릴 수 있습니다");
+        AddHint(grid, "Gemini 응답: 보통 1~3초, 붐비면 최대 30초");
         AddRow(grid, "", _fallback);
         AddHint(grid, "켜면 고른 번역기가 막혔을 때 다른 번역기로 번역합니다");
         AddHint(grid, "인식한 글자는 번역한 서비스로 전송됩니다");
@@ -348,9 +351,9 @@ internal sealed class SettingsForm : Form
         };
         _previewHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(16, 16, 18) };
         Theme.DarkControl(_previewHost);
-        var previewArea = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 8, 0) };
-        previewArea.Controls.Add(_previewHost);
-        previewArea.Controls.Add(previewTitle);
+        _previewArea = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 8, 0) };
+        _previewArea.Controls.Add(_previewHost);
+        _previewArea.Controls.Add(previewTitle);
 
         // ---- 아래: 안내 문구와 버튼 ----
         _message = new Label { AutoSize = true, ForeColor = Theme.Danger, Margin = new Padding(3, 8, 12, 0) };
@@ -365,9 +368,13 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(save);
         buttons.Controls.Add(_message);
+        _previewToggle = new Button { Text = "미리보기 숨기기" };
+        Theme.StyleButton(_previewToggle, false);
+        _previewToggle.Click += (_, _) => TogglePreview();
+        buttons.Controls.Add(_previewToggle);
 
         // Dock 은 나중에 넣은 컨트롤부터 자리를 잡는다: 아래 버튼 → 왼쪽 메뉴 → 항목 → 나머지를 미리보기가 채운다
-        Controls.Add(previewArea);
+        Controls.Add(_previewArea);
         Controls.Add(_content);
         Controls.Add(_navPanel);
         Controls.Add(buttons);
@@ -394,6 +401,29 @@ internal sealed class SettingsForm : Form
         _preview.SizeChanged += (_, _) => CenterPreview();
         _previewHost.SizeChanged += (_, _) => CenterPreview();
         CenterPreview();
+        _widthWithPreview = ClientSize.Width;
+        if (!_config.ShowSettingsPreview) SetPreviewVisible(false);
+    }
+
+    /// <summary>미리보기를 숨기거나 보이고, 그 선택을 바로 저장한다(다음에 설정 창을 열 때도 유지)</summary>
+    private void TogglePreview()
+    {
+        bool show = !_previewArea.Visible;
+        SetPreviewVisible(show);
+        _config.ShowSettingsPreview = _draft.ShowSettingsPreview = show;
+        try { _config.Save(); }
+        catch (Exception ex) { _message.Text = "config.json 저장 실패: " + ex.Message; }
+    }
+
+    /// <summary>미리보기를 숨기면 창을 메뉴·항목 너비로 줄이고, 보이면 원래 너비로 되돌린다</summary>
+    private void SetPreviewVisible(bool show)
+    {
+        if (_previewArea.Visible == show) return;
+        if (!show) _widthWithPreview = ClientSize.Width;
+        _previewArea.Visible = show;
+        _previewToggle.Text = show ? "미리보기 숨기기" : "미리보기 보이기";
+        int narrow = _navPanel.Width + _content.Width;
+        ClientSize = new Size(show ? Math.Max(_widthWithPreview, narrow + 300) : narrow, ClientSize.Height);
     }
 
     /// <summary>미리보기를 미리보기 영역 한가운데에 놓는다. 영역보다 크면 왼쪽 위에 붙이고 스크롤한다</summary>

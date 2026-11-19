@@ -179,6 +179,9 @@ internal sealed class AppConfig
     public bool ShowOriginal { get; set; } = true;
     public bool ShowTranslated { get; set; } = true;
 
+    /// <summary>설정 창 오른쪽에 미리보기를 보일지</summary>
+    public bool ShowSettingsPreview { get; set; } = true;
+
     /// <summary>어느 번역기로 번역했는지 결과 창 오른쪽 아래에 보일지</summary>
     public bool ShowEngine { get; set; } = true;
 
@@ -526,6 +529,15 @@ internal static class ShotTest
         {
             Directory.CreateDirectory(directory);
             var config = new AppConfig();
+
+            // 미리보기를 숨긴 설정 창(창이 메뉴·항목 너비로 줄어드는지 확인)
+            var narrowConfig = new AppConfig { ShowSettingsPreview = false };
+            using (var settings = new SettingsForm(narrowConfig, _ => true) { Opacity = 0, StartPosition = FormStartPosition.Manual, Location = new Point(0, 0) })
+            {
+                settings.Show();
+                Application.DoEvents();
+                Save(settings, Path.Combine(directory, "settings-no-preview.png"));
+            }
 
             using (var settings = new SettingsForm(config, _ => true) { Opacity = 0, StartPosition = FormStartPosition.Manual, Location = new Point(0, 0) })
             {
