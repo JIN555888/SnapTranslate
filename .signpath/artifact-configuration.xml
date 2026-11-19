@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath 서명 설정. SignPath 프로젝트의 Artifact Configuration 에 이 내용을 그대로 넣는다.
+  .github/workflows/release.yml 이 올리는 산출물(unsigned) 구조와 맞춘다:
+    framework/SnapTranslate.exe       : 용량 작은 판
+    self-contained/SnapTranslate.exe  : 런타임 포함판
+  제품 이름·버전이 맞는 실행 파일만 서명한다. 버전은 빌드가 csproj 의 Version 을 넘겨준다.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" />
+  </parameters>
+  <zip-file>
+    <pe-file path="framework/SnapTranslate.exe" product-name="SnapTranslate" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="self-contained/SnapTranslate.exe" product-name="SnapTranslate" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

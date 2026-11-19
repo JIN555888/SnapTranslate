@@ -142,6 +142,32 @@ SnapTranslate 는 **Windows 에 설치된 언어만** 읽을 수 있습니다. �
 
 자세한 내용과 라이선스 전문은 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 에 있습니다.
 
+## 코드 서명 정책
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+- 실행 파일은 이 저장소의 소스로 GitHub Actions 에서 빌드하고 서명합니다. ([빌드 설정](.github/workflows/release.yml))
+- 서명 승인 전 버전(1.2.2 까지)은 서명되어 있지 않습니다.
+- 역할
+  - 작성자(Authors), 검토자(Reviewers), 승인자(Approvers): [JIN555888](https://github.com/JIN555888)
+
+### 개인정보
+
+이 프로그램은 아래 경우 말고는 다른 네트워크 시스템으로 정보를 보내지 않습니다.
+
+- **번역**: 화면에서 읽어 낸 글자를 설정 → 번역기에서 고른 번역 서비스(Google 번역, MyMemory, Gemini)로 보냅니다. 화면 그림은 보내지 않습니다.
+- **업데이트 확인**: GitHub 에 최신 버전을 물어봅니다. 보내는 정보는 없고, 설정 → 정보 → `시작할 때 새 버전 확인` 을 끄면 묻지 않습니다.
+
+각 번역 서비스의 개인정보 처리는 그 서비스의 정책을 따릅니다. 자세한 내용은 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 에 있습니다.
+
+### 지우기
+
+설치 프로그램이 없으므로 폴더를 지우면 됩니다. 그 전에 아래를 확인하세요.
+
+- `Windows 시작 시 자동 실행` 을 켰다면 먼저 끕니다. (레지스트리 시작 프로그램 항목이 지워집니다)
+- 업데이트 때 받은 임시 파일이 `%TEMP%\SnapTranslate-update` 에 남아 있을 수 있습니다.
+- 설정에서 설치한 글자 인식 언어는 Windows 기능이므로 Windows 설정 → 선택적 기능에서 지웁니다.
+
 ## 만든 사람
 
 참발자 — 블로그: https://barja.tistory.com
@@ -151,6 +177,11 @@ SnapTranslate 는 **Windows 에 설치된 언어만** 읽을 수 있습니다. �
 SnapTranslate 자체는 MIT License 로 배포합니다 — Copyright © 2026 참발자
 
 ## 릴리즈 노트
+
+### 1.2.3
+
+**기능**
+- GitHub Actions 에서 빌드해 배포. 코드 서명 준비 (SignPath Foundation)
 
 ### 1.2.2
 
