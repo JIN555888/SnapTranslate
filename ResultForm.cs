@@ -574,7 +574,11 @@ internal sealed class ResultForm : Form
             return;
         }
         _idleMs += _closeTimer.Interval;
-        if (_idleMs >= _config.AutoCloseSeconds * 1000) Close();
+        if (_idleMs >= _config.AutoCloseSeconds * 1000)
+        {
+            DebugLog.Write("결과 창 자동 닫힘");
+            Close();
+        }
     }
 
     /// <summary>결과가 나온 시점부터 자동 닫힘 시간을 다시 잰다</summary>
@@ -625,22 +629,24 @@ internal sealed class ResultForm : Form
         string note = "";
         try
         {
-            string[] languages;
+            string[]? languages;   // 빈 배열 = 설치된 모든 언어로 읽어 가장 맞는 것을 고름, null = 다시 인식하지 않음
             if (source == "auto")
-                languages = _config.OcrLanguages;
-            else if (OcrService.IsAvailable(source))
+                languages = [];
+            else if (OcrService.CanRead(source))
                 languages = [source];
             else
             {
                 // 그 언어의 OCR 이 없으면 다시 인식하지 않고 번역 쪽 원문 언어만 바꾼다
-                languages = [];
+                languages = null;
                 note = $" · {Theme.LangName(source)} OCR 미설치";
             }
 
-            if (languages.Length > 0 || _original.Text.Length == 0)
+            if (languages != null || _original.Text.Length == 0)
             {
                 _status.Text = "글자 인식 중…";
-                var ocr = await OcrService.RecognizeAsync(_crop, languages.Length > 0 ? languages : _config.OcrLanguages);
+                var ocrTimer = System.Diagnostics.Stopwatch.StartNew();
+                var ocr = await OcrService.RecognizeAsync(_crop, languages ?? []);
+                DebugLog.Write($"글자 인식 {_crop.Width}x{_crop.Height} {ocrTimer.ElapsedMilliseconds}ms 글자수={ocr.Text.Length} 엔진={ocr.Language}");
                 if (IsDisposed || generation != _generation) return;
                 SetText(_original, ocr.Text);
             }
@@ -677,7 +683,9 @@ internal sealed class ResultForm : Form
         _status.Text = "번역 중…";
         try
         {
+            var translateTimer = System.Diagnostics.Stopwatch.StartNew();
             var result = await Translator.TranslateAsync(text, source, target, alt);
+            DebugLog.Write($"번역 {translateTimer.ElapsedMilliseconds}ms 글자수={result.Text.Length} 맨 앞 창: {DebugLog.Foreground()}");
             if (IsDisposed || generation != _generation) return;
 
             SetText(_translated, result.Text);

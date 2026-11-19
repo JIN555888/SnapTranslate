@@ -27,16 +27,17 @@ internal static class Theme
     [
         new("ko", "한국어"),
         new("en", "영어"),
-        new("ja", "일본어"),
         new("zh-CN", "중국어(간체)"),
         new("zh-TW", "중국어(번체)"),
-        new("es", "스페인어"),
-        new("fr", "프랑스어"),
-        new("de", "독일어"),
+        new("ja", "일본어"),
+        new("tl", "필리핀어"),
         new("ru", "러시아어"),
         new("vi", "베트남어"),
         new("th", "태국어"),
         new("id", "인도네시아어"),
+        new("es", "스페인어"),
+        new("fr", "프랑스어"),
+        new("de", "독일어"),
     ];
 
     public static readonly LangItem AutoDetect = new("auto", "자동 감지");

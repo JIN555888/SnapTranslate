@@ -171,6 +171,9 @@ internal sealed class SettingsForm : Form
         AddHint(grid, "칸을 누른 뒤 원하는 키 조합을 누르세요");
         AddSeparator(grid);
         AddRow(grid, "원문 언어", _source);
+        AddHint(grid, "보통 \"자동 감지\"로 두세요. 번역할 화면의 언어를 고르는 칸입니다");
+        AddRow(grid, "읽을 수 있는 언어", InfoLabel(string.Join(", ", OcrService.InstalledLanguageNames())));
+        AddHint(grid, "여기 없는 언어(중국어·일본어·러시아어 등)는 Windows 에 추가해야 읽습니다");
         AddRow(grid, "번역 언어", _target);
         AddRow(grid, "원문이 번역 언어일 때", _altTarget);
         AddSeparator(grid);
