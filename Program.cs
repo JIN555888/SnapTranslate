@@ -159,6 +159,10 @@ internal sealed class AppConfig
     public string FieldColor { get; set; } = "#363942";        // 언어 목록·버튼 배경
     public string EngineBadgeColor { get; set; } = "#4F8CFF";  // 오른쪽 아래 번역기 이름 표시의 바탕
     public string DragHandleColor { get; set; } = "#FFCC40";   // 왼쪽 위 창 이동 손잡이
+    public string SelectionColor { get; set; } = "#00AEFF";    // 영역을 고를 때 드래그 선
+
+    /// <summary>영역을 고를 때 드래그 선의 두께(픽셀)</summary>
+    public int SelectionLineWidth { get; set; } = 2;
 
     /// <summary>번역기 이름 표시의 글자 크기(pt)</summary>
     public double EngineBadgeFontSize { get; set; } = 8.5;
@@ -191,6 +195,8 @@ internal sealed class AppConfig
         DragHandleColor = other.DragHandleColor;
         EngineBadgeFontSize = other.EngineBadgeFontSize;
         DragHandleSize = other.DragHandleSize;
+        SelectionColor = other.SelectionColor;
+        SelectionLineWidth = other.SelectionLineWidth;
         ShowDragHandle = other.ShowDragHandle;
         ShowTitleBar = other.ShowTitleBar;
         ShowLanguageRow = other.ShowLanguageRow;
@@ -241,6 +247,7 @@ internal sealed class AppConfig
         TranslatedHeight = Math.Clamp(TranslatedHeight, MinPaneHeight, 1200);
         EngineBadgeFontSize = Math.Clamp(EngineBadgeFontSize, 6, 20);
         DragHandleSize = Math.Clamp(DragHandleSize, 8, 40);
+        SelectionLineWidth = Math.Clamp(SelectionLineWidth, 1, 10);
     }
 
     public void Save()
@@ -530,7 +537,8 @@ internal sealed class TrayContext : ApplicationContext
 
             Rectangle selection;
             timer.Restart();
-            using (var overlay = new OverlayForm(shot, screen, _config.KeepFocusOnApp))
+            using (var overlay = new OverlayForm(shot, screen, _config.KeepFocusOnApp,
+                       Theme.ParseColor(_config.SelectionColor, Color.FromArgb(0, 174, 255)), _config.SelectionLineWidth))
             {
                 DebugLog.Write($"선택 화면 준비 {timer.ElapsedMilliseconds}ms");
                 // 포커스를 가져오지 않는 모드에서는 선택 화면이 키를 받지 못하므로, 선택하는 동안만 Esc 를 전역 단축키로 건다

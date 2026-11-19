@@ -79,6 +79,8 @@ internal sealed class SettingsForm : Form
     private readonly Button _handleColor;         // 창 이동 손잡이 색
     private readonly ValueSlider _badgeFontSize;  // 번역기 이름 표시 글자 크기
     private readonly ValueSlider _handleSize;     // 창 이동 손잡이 크기
+    private readonly Button _selectionColor;      // 영역 고를 때 드래그 선 색
+    private readonly ValueSlider _selectionWidth; // 영역 고를 때 드래그 선 두께
     private readonly CheckBox _showHandle;        // 창 이동 손잡이 표시
 
     private readonly CheckBox _showTitleBar;
@@ -214,6 +216,8 @@ internal sealed class SettingsForm : Form
         _handleColor = CreateColorButton();
         _badgeFontSize = new ValueSlider(6, 20, 0.5m, " pt", Theme.Card);
         _handleSize = new ValueSlider(8, 40, 1, " px", Theme.Card);
+        _selectionColor = CreateColorButton();
+        _selectionWidth = new ValueSlider(1, 10, 1, " px", Theme.Card);
         _showHandle = CreateCheck("창 이동 손잡이 (왼쪽 위)");
         var reset = new Button { Text = "기본 모양으로" };
         Theme.StyleButton(reset, false);
@@ -329,6 +333,9 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "창 이동 손잡이", _handleColor);
         AddRow(grid, "창 이동 손잡이 크기", _handleSize);
         AddHint(grid, "손잡이는 제목 줄을 숨겼을 때 보입니다");
+        AddSeparator(grid);
+        AddRow(grid, "영역 고를 때 선", _selectionColor);
+        AddRow(grid, "영역 고를 때 선 두께", _selectionWidth);
         AddSeparator(grid);
         AddRow(grid, "크기·글자·색·표시 항목", reset);
 
@@ -650,6 +657,8 @@ internal sealed class SettingsForm : Form
             _handleColor.BackColor = Theme.ParseColor(c.DragHandleColor, Color.FromArgb(255, 204, 64));
             _badgeFontSize.Value = (decimal)c.EngineBadgeFontSize;
             _handleSize.Value = c.DragHandleSize;
+            _selectionColor.BackColor = Theme.ParseColor(c.SelectionColor, Color.FromArgb(0, 174, 255));
+            _selectionWidth.Value = c.SelectionLineWidth;
 
             _showTitleBar.Checked = c.ShowTitleBar;
             _showLanguageRow.Checked = c.ShowLanguageRow;
@@ -709,6 +718,8 @@ internal sealed class SettingsForm : Form
         c.DragHandleColor = Theme.ToHex(_handleColor.BackColor);
         c.EngineBadgeFontSize = (double)_badgeFontSize.Value;
         c.DragHandleSize = (int)_handleSize.Value;
+        c.SelectionColor = Theme.ToHex(_selectionColor.BackColor);
+        c.SelectionLineWidth = (int)_selectionWidth.Value;
 
         c.ShowTitleBar = _showTitleBar.Checked;
         c.ShowLanguageRow = _showLanguageRow.Checked;
