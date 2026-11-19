@@ -15,6 +15,8 @@ internal sealed class ResultForm : Form
     private Rectangle _anchor;
     private readonly bool _keepFocus;      // 창이 포커스를 가져가지 않는 모드(창을 만들 때 정해지고 바뀌지 않는다)
     private readonly Button _floatClose;  // 제목 줄을 숨겼을 때 내용 위에 겹쳐 보이는 닫기 단추
+    private readonly Label _engineLabel;  // 어느 번역기로 번역했는지. 내용 오른쪽 아래에 겹쳐 보인다
+    private string _engineName = "";      // 마지막 번역에 쓴 번역기 이름(번역 전·실패면 빈 값)
 
     /// <summary>모양 점검용: 창을 화면 밖 좌표에 띄운다</summary>
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -185,12 +187,18 @@ internal sealed class ResultForm : Form
         Controls.Add(_floatClose);
         _floatClose.BringToFront();
 
+        // 번역기 이름. 아래 줄을 숨겨도 보이게, 닫기 단추처럼 창 위에 직접 올린다
+        _engineLabel = new Label { AutoSize = true, Font = new Font(Theme.FontName, 7.5f), Visible = false };
+        Controls.Add(_engineLabel);
+        _split.SplitterMoved += (_, _) => PlaceEngineLabel();
+
         if (preview)
         {
             // 미리보기는 모양만 보여 주므로 예시 글을 넣고 동작은 연결하지 않는다
             SetText(_original, "The quick brown fox jumps over the lazy dog.\r\nPress the hotkey and drag to select a region.");
             SetText(_translated, "날렵한 갈색 여우가 게으른 개를 뛰어넘습니다.\r\n단축키를 누르고 끌어서 영역을 선택하세요.");
             _status.Text = "영어(감지) → 한국어";
+            _engineName = Translator.EngineName(Translator.Google);
         }
         else
         {
@@ -207,6 +215,8 @@ internal sealed class ResultForm : Form
         _retranslate.Enabled = original.Length > 0;
         _copy.Enabled = translated.Length > 0;
         if (status != null) _status.Text = status;
+        _engineName = translated.Length > 0 ? Translator.EngineName(Translator.Google) : "";
+        PlaceEngineLabel();
     }
 
     /// <summary>닫기 단추를 창 오른쪽 위 구석에 바짝 붙인다</summary>
@@ -216,10 +226,26 @@ internal sealed class ResultForm : Form
         _floatClose.BringToFront();
     }
 
+    /// <summary>번역기 이름을 내용(원문·번역 칸) 오른쪽 아래 구석에 놓는다. 번역 전이거나 옵션이 꺼져 있으면 숨긴다</summary>
+    private void PlaceEngineLabel()
+    {
+        if (_engineLabel == null) return;   // 생성자 도중에도 불린다
+        _engineLabel.Text = _engineName;
+        _engineLabel.Visible = _config.ShowEngine && _engineName.Length > 0;
+        if (!_engineLabel.Visible) return;
+
+        // 세로 스크롤 막대와 겹치지 않게 그 폭만큼 왼쪽에 둔다
+        Rectangle content = RectangleToClient(_split.RectangleToScreen(_split.ClientRectangle));
+        int right = content.Right - 6 - SystemInformation.VerticalScrollBarWidth;
+        _engineLabel.Location = new Point(right - _engineLabel.Width, content.Bottom - _engineLabel.Height - 6);
+        _engineLabel.BringToFront();
+    }
+
     protected override void OnClientSizeChanged(EventArgs e)
     {
         base.OnClientSizeChanged(e);
         if (_floatClose != null) PlaceFloatClose();   // 생성자 도중에도 불리므로 만들어진 뒤에만
+        PlaceEngineLabel();
     }
 
     /// <summary>Ctrl + 마우스 휠로 그 칸의 글자 크기를 0.5 씩 바꾸고 설정에 저장한다</summary>
@@ -245,9 +271,37 @@ internal sealed class ResultForm : Form
     /// 번역 칸에 진행 상태·오류 같은 안내 글을 흐린 색으로 보인다.
     /// 아래 줄(상태 표시)을 숨기고 쓰면 번역되는 동안 칸이 빈 채로 보여, 번역 칸 자체에 상태를 적는다.
     /// </summary>
-    private void ShowNote(string text)
+    private void ShowNote(string text) => ShowNote(text, false);
+
+    // 진행 중 표시에 붙여 움직이는 점. 멈춘 것이 아니라 일하는 중임을 보인다
+    private static readonly string[] BusyFrames = ["●○○", "○●○", "○○●", "○●○"];
+    private readonly System.Windows.Forms.Timer _busyTimer = new() { Interval = 300 };
+    private string _busyText = "";
+    private int _busyFrame;
+
+    /// <summary>진행 중 안내를 움직이는 점과 함께 보인다. 다른 글(번역문·오류)이 들어오면 멈춘다</summary>
+    private void ShowBusy(string text)
     {
+        _busyText = text;
+        _busyFrame = 0;
+        ShowNote($"{text}  {BusyFrames[0]}", true);
+        _busyTimer.Start();
+    }
+
+    private void OnBusyTick()
+    {
+        // 사용자가 글을 고르는 중이거나 안내가 이미 바뀌었으면 건드리지 않는다
+        if (!_translatedIsNote || IsDisposed) { _busyTimer.Stop(); return; }
+        _busyFrame = (_busyFrame + 1) % BusyFrames.Length;
+        SetText(_translated, $"{_busyText}  {BusyFrames[_busyFrame]}");
+    }
+
+    private void ShowNote(string text, bool busy)
+    {
+        if (!busy) _busyTimer.Stop();
         _translatedIsNote = true;
+        _engineName = "";   // 번역 중·실패 안내에는 번역기 이름을 붙이지 않는다
+        PlaceEngineLabel();
         _translated.ForeColor = Theme.ParseColor(_config.LabelColor, Theme.SubText);
         SetText(_translated, text);
         _copy.Enabled = false;
@@ -256,6 +310,7 @@ internal sealed class ResultForm : Form
     /// <summary>번역 칸에 실제 번역문을 보인다(안내 글이었으면 글자 색을 되돌린다)</summary>
     private void ShowTranslation(string text)
     {
+        _busyTimer.Stop();
         _translatedIsNote = false;
         _translated.ForeColor = Theme.ParseColor(_config.TranslatedColor, Theme.Text);
         SetText(_translated, text);
@@ -276,6 +331,7 @@ internal sealed class ResultForm : Form
     {
         _close.Click += (_, _) => Close();
         _floatClose.Click += (_, _) => Close();
+        _busyTimer.Tick += (_, _) => OnBusyTick();
         _settings.Click += (_, _) => openSettings();
 
         // 제목 줄을 숨겨도 창을 옮길 수 있게 칸 여백·칸 제목도 끌 수 있게 한다
@@ -320,6 +376,7 @@ internal sealed class ResultForm : Form
         AddToggle("칸 제목 표시", () => _config.ShowCaptions, v => _config.ShowCaptions = v);
         AddToggle("원문 칸 표시", () => _config.ShowOriginal, v => _config.ShowOriginal = v);
         AddToggle("번역 칸 표시", () => _config.ShowTranslated, v => _config.ShowTranslated = v);
+        AddToggle("번역기 이름 표시", () => _config.ShowEngine, v => _config.ShowEngine = v);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("번역 복사", null, (_, _) => CopyTranslation());
         menu.Items.Add("설정…", null, (_, _) => openSettings());
@@ -536,6 +593,11 @@ internal sealed class ResultForm : Form
         _split.Panel2.Padding = new Padding(4, ShowsOriginal ? 0 : 4, 4, 4);
         PerformLayout();
         _root.PerformLayout();
+
+        // 번역기 이름은 칸 위에 놓이므로 칸 배경색에 맞춘다. 칸 크기가 정해진 뒤에 자리를 잡는다
+        _engineLabel.BackColor = card;
+        _engineLabel.ForeColor = label;
+        PlaceEngineLabel();
     }
 
     private static void SetFont(TextBox box, string name, float size)
@@ -699,7 +761,7 @@ internal sealed class ResultForm : Form
         _anchor = anchor;
 
         SetText(_original, "");
-        ShowNote("글자 인식 중…");
+        ShowBusy("화면에서 글자 읽는 중");
         _copy.Enabled = false;
         _autoCloseArmed = false;
         // 이전 캡처에서 바꾼 언어 선택은 설정 기본값으로 되돌린다
@@ -742,7 +804,7 @@ internal sealed class ResultForm : Form
             if (languages != null || _original.Text.Length == 0)
             {
                 _status.Text = "글자 인식 중…";
-                ShowNote("글자 인식 중…");
+                ShowBusy("화면에서 글자 읽는 중");
                 var ocrTimer = System.Diagnostics.Stopwatch.StartNew();
                 var ocr = await OcrService.RecognizeAsync(_crop, languages ?? []);
                 DebugLog.Write($"글자 인식 {_crop.Width}x{_crop.Height} {ocrTimer.ElapsedMilliseconds}ms 글자수={ocr.Text.Length} 엔진={ocr.Language}");
@@ -784,15 +846,29 @@ internal sealed class ResultForm : Form
         string? alt = initial && source == "auto" ? _config.AltTargetLang : null;
 
         _status.Text = "번역 중…";
-        ShowNote("번역 중…");
+        ShowBusy("번역 준비 중");
+        var options = TranslateOptions.From(_config) with
+        {
+            // 어느 번역기에 묻는 중인지, 앞의 번역기가 막혀 넘어온 것인지 보인다
+            OnTry = (engine, failed) =>
+            {
+                if (IsDisposed || generation != _generation) return;
+                string name = Translator.EngineName(engine);
+                ShowBusy(failed == null
+                    ? $"{name}에 물어보는 중"
+                    : $"{Translator.EngineName(failed)} 응답 없음 → {name}에 다시 물어보는 중");
+            },
+        };
         try
         {
             var translateTimer = System.Diagnostics.Stopwatch.StartNew();
-            var result = await Translator.TranslateAsync(text, source, target, alt, TranslateOptions.From(_config));
+            var result = await Translator.TranslateAsync(text, source, target, alt, options);
             DebugLog.Write($"번역 {translateTimer.ElapsedMilliseconds}ms 글자수={result.Text.Length} 번역기={result.Engine} 맨 앞 창: {DebugLog.Foreground()}");
             if (IsDisposed || generation != _generation) return;
 
             ShowTranslation(result.Text);
+            _engineName = result.Engine.Length > 0 ? Translator.EngineName(result.Engine) : "";
+            PlaceEngineLabel();
             _copy.Enabled = result.Text.Length > 0;
             // 자동 전환으로 번역 언어가 바뀌었으면 콤보에도 반영한다
             _suppressEvents = true;
@@ -802,11 +878,7 @@ internal sealed class ResultForm : Form
             string from = source == "auto" && result.SourceLang.Length > 0
                 ? $"{Theme.LangName(result.SourceLang)}(감지)"
                 : Theme.LangName(source);
-            // 고른 번역기가 아닌 예비 번역기로 번역됐으면 어느 것인지 알린다
-            string via = result.Engine.Length > 0 && !result.Engine.Equals(_config.TranslateEngine, StringComparison.OrdinalIgnoreCase)
-                ? $" · {Translator.EngineName(result.Engine)}"
-                : "";
-            _status.Text = $"{from} → {Theme.LangName(result.TargetLang)}{via}{note}";
+            _status.Text = $"{from} → {Theme.LangName(result.TargetLang)}{note}";
             if (_config.CopyTranslation) CopyTranslation();
             ArmAutoClose();
         }

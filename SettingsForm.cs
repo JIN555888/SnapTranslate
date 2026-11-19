@@ -75,6 +75,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _showCaptions;
     private readonly CheckBox _showOriginal;
     private readonly CheckBox _showTranslated;
+    private readonly CheckBox _showEngine;
 
     private static readonly Color NavColor = Color.FromArgb(23, 24, 28);
     private static readonly Color SeparatorColor = Color.FromArgb(64, 67, 78);
@@ -190,6 +191,7 @@ internal sealed class SettingsForm : Form
         _showCaptions = CreateCheck("칸 제목(원문/번역)");
         _showOriginal = CreateCheck("원문 칸");
         _showTranslated = CreateCheck("번역 칸");
+        _showEngine = CreateCheck("번역기 이름 (오른쪽 아래)");
 
         // 왼쪽 메뉴에서 분류를 고르면 가운데에 그 분류의 항목만 보인다
         TableLayoutPanel grid = NewPage("동작", "단축키, 언어, 창이 뜨는 자리, 자동 닫힘");
@@ -281,6 +283,7 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "", _showLanguageRow);
         AddRow(grid, "", _showBottomBar);
         AddRow(grid, "", _showCaptions);
+        AddRow(grid, "", _showEngine);
         AddHint(grid, "숨긴 뒤에는 결과 창 우클릭 메뉴로 다시 켤 수 있습니다");
 
         // ---- 정보 ----
@@ -455,6 +458,7 @@ internal sealed class SettingsForm : Form
             _showCaptions.Checked = c.ShowCaptions;
             _showOriginal.Checked = c.ShowOriginal;
             _showTranslated.Checked = c.ShowTranslated;
+            _showEngine.Checked = c.ShowEngine;
             UpdatePositionInputs();
         }
         finally
@@ -506,6 +510,7 @@ internal sealed class SettingsForm : Form
         c.ShowCaptions = _showCaptions.Checked;
         c.ShowOriginal = _showOriginal.Checked;
         c.ShowTranslated = _showTranslated.Checked;
+        c.ShowEngine = _showEngine.Checked;
     }
 
     /// <summary>값이 바뀔 때마다 미리보기를 다시 그리도록 모든 입력에 연결한다</summary>
@@ -516,7 +521,7 @@ internal sealed class SettingsForm : Form
         _autoClose.ValueChanged += (_, _) => OnChanged();
         foreach (var slider in new[] { _opacity, _width, _originalHeight, _translatedHeight, _originalFontSize, _translatedFontSize })
             slider.ValueChanged += (_, _) => OnChanged();
-        foreach (var check in new[] { _autoCopy, _reuseWindow, _closeOnEsc, _showTitleBar, _showLanguageRow, _showBottomBar, _showCaptions, _showOriginal, _showTranslated })
+        foreach (var check in new[] { _autoCopy, _reuseWindow, _closeOnEsc, _showTitleBar, _showLanguageRow, _showBottomBar, _showCaptions, _showOriginal, _showTranslated, _showEngine })
             check.CheckedChanged += (_, _) => OnChanged();
         foreach (var color in new[] { _originalColor, _translatedColor, _backgroundColor, _cardColor, _accentColor, _labelColor, _fieldColor })
             color.BackColorChanged += (_, _) => OnChanged();

@@ -166,6 +166,7 @@ internal sealed class AppConfig
         ShowCaptions = other.ShowCaptions;
         ShowOriginal = other.ShowOriginal;
         ShowTranslated = other.ShowTranslated;
+        ShowEngine = other.ShowEngine;
     }
 
     // 원문·번역 칸 말고 나머지 부분을 보일지
@@ -177,6 +178,9 @@ internal sealed class AppConfig
     // 원문 칸·번역 칸을 보일지. 둘 다 끄면 번역 칸은 보인다
     public bool ShowOriginal { get; set; } = true;
     public bool ShowTranslated { get; set; } = true;
+
+    /// <summary>어느 번역기로 번역했는지 결과 창 오른쪽 아래에 보일지</summary>
+    public bool ShowEngine { get; set; } = true;
 
     /// <summary>결과 창 가로와 원문·번역 칸 세로의 최소 크기(100% 배율 기준 픽셀). 작게 쓰고 싶은 경우를 위해 낮게 둔다</summary>
     public const int MinWidth = 120;

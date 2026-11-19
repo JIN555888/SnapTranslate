@@ -9,6 +9,9 @@ internal sealed record TranslateOptions(string Engine, bool Fallback, string Gem
 {
     public static readonly TranslateOptions Default = new(Translator.Google, false, "", Translator.DefaultGeminiModel);
 
+    /// <summary>번역기에 요청을 보내기 직전에 불린다(번역기 코드, 앞서 실패한 번역기 코드 또는 null). 진행 표시용</summary>
+    public Action<string, string?>? OnTry { get; init; }
+
     public static TranslateOptions From(AppConfig config) =>
         new(config.TranslateEngine, config.TranslateFallback, config.GeminiApiKey, config.GeminiModel);
 }
@@ -30,6 +33,9 @@ internal static class Translator
     public const string Gemini = "gemini";
 
     public const string DefaultGeminiModel = "gemini-flash-latest";
+
+    /// <summary>기본 모델이 붐빌 때 대신 쓰는 가벼운 모델</summary>
+    public const string GeminiBackupModel = "gemini-3.5-flash-lite";
 
     /// <summary>Gemini API 키를 만드는 페이지</summary>
     public const string GeminiKeyUrl = "https://aistudio.google.com/apikey";
@@ -73,8 +79,11 @@ internal static class Translator
         if (string.IsNullOrWhiteSpace(source)) source = "auto";
 
         var errors = new List<string>();
+        string? failed = null;
         foreach (string engine in EngineOrder(options))
         {
+            options.OnTry?.Invoke(engine, failed);
+            failed = engine;
             try
             {
                 var output = await TranslateWithAsync(engine, text, source, target, altTarget, options);
@@ -353,35 +362,30 @@ internal static class Translator
             contents = new[] { new { role = "user", parts = new[] { new { text } } } },
             generationConfig = new { responseMimeType = "application/json" },
         };
-        string url = "https://generativelanguage.googleapis.com/v1beta/models/" + Uri.EscapeDataString(model) + ":generateContent";
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        // 모델이 붐비면(500·503) 잠깐 쉬고 다시 보낸다. 그래도 안 되면 가벼운 모델로 한 번 더 시도한다
+        string json = JsonSerializer.Serialize(payload);
+        string body = "";
+        var models = new List<string> { model };
+        if (!model.Equals(GeminiBackupModel, StringComparison.OrdinalIgnoreCase)) models.Add(GeminiBackupModel);
+        for (int m = 0; m < models.Count; m++)
         {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
-        };
-        // 키는 주소가 아니라 헤더로 보낸다(주소는 기록에 남기 쉽다)
-        request.Headers.Add("x-goog-api-key", key);
-
-        using var response = await SendAsync(request, 40);
-        string body = await response.Content.ReadAsStringAsync();
-        if (!response.IsSuccessStatusCode)
-        {
-            int code = (int)response.StatusCode;
-            string detail = "";
-            try
+            int tries = m == 0 ? 3 : 1;
+            for (int attempt = 1; attempt <= tries; attempt++)
             {
-                using var error = JsonDocument.Parse(body);
-                if (error.RootElement.TryGetProperty("error", out var e) && e.TryGetProperty("message", out var m))
-                    detail = m.ToString();
+                try
+                {
+                    body = await GeminiPostAsync(models[m], key, json);
+                    m = models.Count;   // 성공: 바깥 반복도 끝낸다
+                    break;
+                }
+                catch (GeminiBusyException busy)
+                {
+                    DebugLog.Write($"  Gemini {models[m]} 붐빔({attempt}/{tries})");
+                    bool last = attempt == tries && m == models.Count - 1;
+                    if (last) throw new TranslateException(busy.Message);
+                    if (attempt < tries) await Task.Delay(700 * attempt);
+                }
             }
-            catch (JsonException) { }
-            string reason = code switch
-            {
-                429 => "사용량 한도 초과",
-                400 or 401 or 403 => "API 키를 확인하세요",
-                404 => $"모델 이름({model})을 확인하세요",
-                _ => "서버 오류",
-            };
-            throw new TranslateException($"{reason}({code}) {Shorten(detail)}".Trim(), code == 429);
         }
 
         // 응답 형식: candidates[0].content.parts[].text (생각 과정은 thought=true 로 표시되므로 뺀다)
@@ -406,6 +410,44 @@ internal static class Translator
         var (detected, translated) = ParseGeminiAnswer(answer.ToString());
         if (detected.Length == 0 && !source.Equals("auto", StringComparison.OrdinalIgnoreCase)) detected = source;
         return new TranslateOutput(NormalizeLines(translated), detected, target, Gemini);
+    }
+
+    /// <summary>모델이 붐벼서(500·503) 잠시 뒤 다시 보내면 될 수 있는 실패</summary>
+    private sealed class GeminiBusyException(string message) : Exception(message);
+
+    /// <summary>Gemini 에 요청을 한 번 보내고 응답 본문을 돌려준다</summary>
+    private static async Task<string> GeminiPostAsync(string model, string key, string json)
+    {
+        string url = "https://generativelanguage.googleapis.com/v1beta/models/" + Uri.EscapeDataString(model) + ":generateContent";
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        // 키는 주소가 아니라 헤더로 보낸다(주소는 기록에 남기 쉽다)
+        request.Headers.Add("x-goog-api-key", key);
+
+        using var response = await SendAsync(request, 40);
+        string body = await response.Content.ReadAsStringAsync();
+        if (response.IsSuccessStatusCode) return body;
+
+        int code = (int)response.StatusCode;
+        string detail = "";
+        try
+        {
+            using var error = JsonDocument.Parse(body);
+            if (error.RootElement.TryGetProperty("error", out var e) && e.TryGetProperty("message", out var m))
+                detail = m.ToString();
+        }
+        catch (JsonException) { }
+        if (code is 500 or 503) throw new GeminiBusyException($"서버가 붐빔({code}). 잠시 뒤 다시 시도하세요");
+        string reason = code switch
+        {
+            429 => "사용량 한도 초과",
+            400 or 401 or 403 => "API 키를 확인하세요",
+            404 => $"모델 이름({model})을 확인하세요",
+            _ => "서버 오류",
+        };
+        throw new TranslateException($"{reason}({code}) {Shorten(detail)}".Trim(), code == 429);
     }
 
     /// <summary>{"source":"..","text":".."} 를 읽는다. 형식이 다르면 받은 글을 그대로 번역문으로 쓴다</summary>
