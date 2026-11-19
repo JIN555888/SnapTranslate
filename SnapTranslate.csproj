@@ -14,7 +14,7 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
 
     <!-- 실행 파일 속성(파일 정보)에 들어가는 값. 버전을 올릴 때는 Version 만 바꾼다 -->
-    <Version>1.2.1</Version>
+    <Version>1.2.2</Version>
     <Product>SnapTranslate</Product>
     <Description>단축키로 화면 영역을 캡처해 글자를 인식(OCR)하고 번역합니다.</Description>
     <Authors>참발자</Authors>

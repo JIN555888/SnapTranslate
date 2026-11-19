@@ -23,16 +23,21 @@ internal sealed class OverlayForm : Form
     private bool _dragging;
     private Rectangle _selection;
 
-    public OverlayForm(Bitmap shot, Rectangle virtualScreen, bool keepFocus, Color lineColor, int lineWidth)
+    public OverlayForm(Bitmap shot, Rectangle virtualScreen, bool keepFocus, Color lineColor, int lineWidth, int dimPercent)
     {
         _shot = shot;
         _keepFocus = keepFocus;
         _lineColor = lineColor;
         _lineWidth = Math.Clamp(lineWidth, 1, 10);
         _dim = new Bitmap(shot);
-        using (var g = Graphics.FromImage(_dim))
-        using (var shade = new SolidBrush(Color.FromArgb(110, 0, 0, 0)))
+        // 고르지 않은 부분을 어둡게 하는 정도(0~90%)를 검은색의 불투명도로 바꾼다
+        int alpha = (int)Math.Round(Math.Clamp(dimPercent, 0, 90) * 255 / 100.0);
+        if (alpha > 0)
+        {
+            using var g = Graphics.FromImage(_dim);
+            using var shade = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0));
             g.FillRectangle(shade, 0, 0, _dim.Width, _dim.Height);
+        }
 
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
