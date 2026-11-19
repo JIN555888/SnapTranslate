@@ -16,15 +16,19 @@ internal sealed class OverlayForm : Form
     private readonly Bitmap _shot;   // 원본 화면 (소유권은 호출자)
     private readonly Bitmap _dim;    // 어둡게 만든 사본
     private readonly bool _keepFocus;
+    private readonly Color _lineColor;   // 드래그 선 색
+    private readonly int _lineWidth;     // 드래그 선 두께(픽셀)
     private readonly TaskCompletionSource<Rectangle?> _done = new();
     private Point _start;
     private bool _dragging;
     private Rectangle _selection;
 
-    public OverlayForm(Bitmap shot, Rectangle virtualScreen, bool keepFocus)
+    public OverlayForm(Bitmap shot, Rectangle virtualScreen, bool keepFocus, Color lineColor, int lineWidth)
     {
         _shot = shot;
         _keepFocus = keepFocus;
+        _lineColor = lineColor;
+        _lineWidth = Math.Clamp(lineWidth, 1, 10);
         _dim = new Bitmap(shot);
         using (var g = Graphics.FromImage(_dim))
         using (var shade = new SolidBrush(Color.FromArgb(110, 0, 0, 0)))
@@ -95,8 +99,11 @@ internal sealed class OverlayForm : Form
         {
             // 선택 영역만 원래 밝기로 보여 준다
             g.DrawImage(_shot, _selection, _selection, GraphicsUnit.Pixel);
-            using var pen = new Pen(Color.FromArgb(0, 174, 255), 2);
-            g.DrawRectangle(pen, _selection);
+            // 선은 고른 영역 바깥쪽으로 그려서 두꺼워도 안쪽 글자를 가리지 않게 한다
+            var outline = _selection;
+            outline.Inflate((_lineWidth + 1) / 2, (_lineWidth + 1) / 2);
+            using var pen = new Pen(_lineColor, _lineWidth);
+            g.DrawRectangle(pen, outline);
         }
     }
 
@@ -150,7 +157,7 @@ internal sealed class OverlayForm : Form
 
         // 바뀐 부분만 다시 그린다
         var dirty = Rectangle.Union(old, rect);
-        dirty.Inflate(4, 4);
+        dirty.Inflate(_lineWidth + 4, _lineWidth + 4);
         Invalidate(dirty);
     }
 
