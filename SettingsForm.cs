@@ -235,6 +235,7 @@ internal sealed class SettingsForm : Form
         AddHint(grid, "Google 번역: 키 없이 사용. 많이 쓰면 잠시 막힐 수 있음");
         AddHint(grid, "MyMemory: 키 없이 사용. 하루 약 5,000자까지");
         AddHint(grid, "Gemini: AI 번역. 문맥·게임 용어에 강함. 무료 API 키 필요");
+        AddHint(grid, "Gemini 는 보통 1~3초, 붐빌 때는 30초까지 걸릴 수 있습니다");
         AddRow(grid, "", _fallback);
         AddHint(grid, "켜면 고른 번역기가 막혔을 때 다른 번역기로 번역합니다");
         AddHint(grid, "인식한 글자는 번역한 서비스로 전송됩니다");
