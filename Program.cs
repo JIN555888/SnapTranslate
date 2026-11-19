@@ -63,6 +63,12 @@ internal sealed class AppConfig
     /// <summary>true 면 결과 창 하나를 계속 쓰며 내용만 바꾼다. false 면 캡처할 때마다 새 창을 연다</summary>
     public bool ReuseWindow { get; set; } = true;
 
+    /// <summary>
+    /// 캡처·번역하는 동안 원래 쓰던 프로그램(게임 등)이 포커스를 잃지 않게 할지.
+    /// 켜면 선택 화면과 결과 창이 포커스를 가져가지 않는다(결과 창은 클릭하면 포커스를 받는다).
+    /// </summary>
+    public bool KeepFocusOnApp { get; set; } = true;
+
     /// <summary>결과 창에서 Esc 를 누르면 창을 닫을지</summary>
     public bool CloseOnEsc { get; set; } = true;
 
@@ -230,6 +236,9 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
 
     public event Action? Pressed;
     private bool _registered;
+    private const int EscapeId = 2;
+    private bool _escapeRegistered;
+    private Action? _onEscape;
 
     public HotkeyWindow() => CreateHandle(new CreateParams());
 
@@ -246,6 +255,20 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
     {
         if (_registered) UnregisterHotKey(Handle, HotkeyId);
         _registered = false;
+    }
+
+    /// <summary>Esc 를 잠시 전역 단축키로 건다(포커스 없이 떠 있는 선택 화면을 취소할 수 있게)</summary>
+    public void RegisterEscape(Action onEscape)
+    {
+        _onEscape = onEscape;
+        _escapeRegistered = RegisterHotKey(Handle, EscapeId, MOD_NOREPEAT, (uint)Keys.Escape);
+    }
+
+    public void UnregisterEscape()
+    {
+        if (_escapeRegistered) UnregisterHotKey(Handle, EscapeId);
+        _escapeRegistered = false;
+        _onEscape = null;
     }
 
     private static bool TryParse(string text, out uint mods, out Keys key)
@@ -274,6 +297,8 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
     {
         if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HotkeyId)
             Pressed?.Invoke();
+        else if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == EscapeId)
+            _onEscape?.Invoke();
         base.WndProc(ref m);
     }
 
@@ -395,7 +420,7 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    private void StartCapture()
+    private async void StartCapture()
     {
         if (_capturing || _settingsOpen) return;
         _capturing = true;
@@ -414,13 +439,17 @@ internal sealed class TrayContext : ApplicationContext
 
             Rectangle selection;
             timer.Restart();
-            using (var overlay = new OverlayForm(shot, screen))
+            using (var overlay = new OverlayForm(shot, screen, _config.KeepFocusOnApp))
             {
                 DebugLog.Write($"선택 화면 준비 {timer.ElapsedMilliseconds}ms");
-                DialogResult picked = overlay.ShowDialog();
-                DebugLog.Write($"선택 끝 결과={picked} 영역={overlay.Selection.Width}x{overlay.Selection.Height}");
-                if (picked != DialogResult.OK) return;
-                selection = overlay.Selection;
+                // 포커스를 가져오지 않는 모드에서는 선택 화면이 키를 받지 못하므로, 선택하는 동안만 Esc 를 전역 단축키로 건다
+                if (_config.KeepFocusOnApp) _hotkey.RegisterEscape(overlay.Cancel);
+                Rectangle? picked;
+                try { picked = await overlay.PickAsync(); }
+                finally { _hotkey.UnregisterEscape(); }
+                DebugLog.Write($"선택 끝 영역={(picked is { } r ? $"{r.Width}x{r.Height}" : "취소")} 맨 앞 창: {DebugLog.Foreground()}");
+                if (picked == null) return;
+                selection = picked.Value;
             }
             if (selection.Width < 5 || selection.Height < 5) return;
             _hitchWatcher.Start();   // 선택에 걸린 시간은 빼고, 선택이 끝난 시점부터 다시 감시한다
@@ -441,8 +470,8 @@ internal sealed class TrayContext : ApplicationContext
             var result = new ResultForm(_config, anchor, crop, OpenSettings);
             _lastResult = result;
             result.Show();
-            result.Activate();
-            DebugLog.Write($"결과 창 새로 만들어 표시 {timer.ElapsedMilliseconds}ms");
+            if (!_config.KeepFocusOnApp) result.Activate();
+            DebugLog.Write($"결과 창 새로 만들어 표시 {timer.ElapsedMilliseconds}ms 맨 앞 창: {DebugLog.Foreground()}");
             result.Start();
         }
         catch (Exception ex)
@@ -488,6 +517,23 @@ internal static class ShotTest
                 }
             }
 
+            // 포커스 유지 모드: 결과 창을 띄우고 숨겼다 다시 띄워도 맨 앞 창이 바뀌지 않는지 확인한다
+            {
+                var lines = new List<string> { "띄우기 전: " + DebugLog.Foreground() };
+                var timer = Stopwatch.StartNew();
+                using var probe = new ResultForm(new AppConfig { KeepFocusOnApp = true }, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { TestOffscreen = true };
+                probe.Show();
+                Application.DoEvents();
+                lines.Add($"처음 띄운 뒤({timer.ElapsedMilliseconds}ms): " + DebugLog.Foreground());
+                probe.Hide();
+                Application.DoEvents();
+                timer.Restart();
+                probe.Show();
+                Application.DoEvents();
+                lines.Add($"숨겼다 다시 띄운 뒤({timer.ElapsedMilliseconds}ms): " + DebugLog.Foreground());
+                File.WriteAllLines(Path.Combine(directory, "focus.txt"), lines);
+            }
+
             // 문서(README)에 넣을 화면 그림: 설정 창과 번역 결과 창
             using (var settings = new SettingsForm(config, _ => true) { Opacity = 0, StartPosition = FormStartPosition.Manual, Location = new Point(0, 0) })
             {
@@ -515,7 +561,8 @@ internal static class ShotTest
             var tiny = new AppConfig { WindowWidth = 160, OriginalHeight = 20, TranslatedHeight = 40, ShowTitleBar = false, ShowLanguageRow = false, ShowBottomBar = false, ShowCaptions = false };
             foreach (var (name, cfg) in new[] { ("result.png", config), ("result-compact.png", compact), ("result-translated-only.png", translatedOnly), ("result-original-only.png", originalOnly), ("result-tiny.png", tiny) })
             {
-                using var result = new ResultForm(cfg, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { Opacity = 0 };
+                // 겹쳐 놓은 컨트롤까지 실제와 같게 찍으려고, 투명하게 만들지 않고 화면 밖에 띄워 창 내용을 그대로 받아 온다
+                using var result = new ResultForm(cfg, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { TestOffscreen = true };
                 // 점검 도중 창이 저절로 닫히면 어디서 닫았는지 남긴다
                 result.FormClosed += (_, _) => File.WriteAllText(Path.Combine(directory, "closed-" + name + ".txt"), Environment.StackTrace);
                 result.Show();
@@ -536,7 +583,7 @@ internal static class ShotTest
                 }
                 result.SetTexts(longText, "짧은 번역");
                 Application.DoEvents();
-                Save(result, Path.Combine(directory, name));
+                SaveComposed(result, Path.Combine(directory, name));
             }
             return 0;
         }
@@ -545,6 +592,25 @@ internal static class ShotTest
             File.WriteAllText(Path.Combine(directory, "error.txt"), ex.ToString());
             return 1;
         }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+
+    /// <summary>
+    /// 창을 화면에 합성된 모습 그대로 저장한다(겹친 컨트롤의 앞뒤 순서가 실제와 같다).
+    /// DrawToBitmap 은 겹친 컨트롤을 실제와 다른 순서로 그릴 수 있어, 겹침을 확인할 때는 이쪽을 쓴다.
+    /// </summary>
+    private static void SaveComposed(Form form, string path)
+    {
+        using var bitmap = new Bitmap(form.Width, form.Height);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            IntPtr dc = g.GetHdc();
+            try { PrintWindow(form.Handle, dc, 2 /*PW_RENDERFULLCONTENT*/); }
+            finally { g.ReleaseHdc(dc); }
+        }
+        bitmap.Save(path, ImageFormat.Png);
     }
 
     /// <param name="clientOnly">true 면 제목 표시줄·테두리를 빼고 창 안쪽만 저장한다</param>
@@ -626,10 +692,35 @@ internal static class SelfTest
             }
             OcrOutput koreanOcr = Task.Run(() => OcrService.RecognizeAsync(korean, [])).GetAwaiter().GetResult();
 
+            // 다른 문자의 글도 맞는 엔진이 골라지는지 본다(해당 OCR 언어가 설치된 PC 에서만 의미가 있다)
+            var samples = new (string Name, string Font, string Text)[]
+            {
+                ("일본어", "Yu Gothic UI", "設定を保存しました。ゲームを続けますか?"),
+                ("중국어(번체)", "Microsoft JhengHei UI", "設定已儲存。您要繼續遊戲嗎?"),
+                ("중국어(간체)", "Microsoft YaHei UI", "设置已保存。您要继续游戏吗?"),
+                ("러시아어", "Segoe UI", "Настройки сохранены. Продолжить игру?"),
+                ("베트남어", "Segoe UI", "Cài đặt đã được lưu. Bạn có muốn tiếp tục trò chơi không?"),
+                ("필리핀어", "Segoe UI", "Nai-save na ang mga setting. Gusto mo bang ituloy ang laro?"),
+            };
+            var detectLines = new List<string>();
+            foreach (var (name, fontName, text) in samples)
+            {
+                using var image = new Bitmap(1100, 80);
+                using (var g = Graphics.FromImage(image))
+                using (var font = new Font(fontName, 16))
+                {
+                    g.Clear(Color.White);
+                    g.DrawString(text, font, Brushes.Black, 20, 20);
+                }
+                OcrOutput found = Task.Run(() => OcrService.RecognizeAsync(image, [])).GetAwaiter().GetResult();
+                detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}");
+            }
+
             File.WriteAllText(outputPath,
                 $"버전: {AppInfo.VersionText}\r\n업데이트 확인: {update.Message} (최신 {update.LatestVersion})\r\n" +
                 $"읽을 수 있는 언어: {string.Join(", ", OcrService.InstalledLanguageNames())}\r\n" +
                 $"한글 그림 → 엔진 {koreanOcr.Language}: {koreanOcr.Text}\r\n" +
+                string.Join("\r\n", detectLines) + "\r\n" +
                 $"OCR 언어: {ocr.Language}\r\nOCR 결과: {ocr.Text}\r\n감지 언어: {translated.SourceLang}\r\n번역: {translated.Text}\r\n");
             return 0;
         }

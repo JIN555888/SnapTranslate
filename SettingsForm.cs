@@ -36,6 +36,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _autoCopy;
     private readonly CheckBox _reuseWindow;
     private readonly CheckBox _closeOnEsc;
+    private readonly CheckBox _keepFocus;
     private readonly CheckBox _startupNotice;
     private readonly Label _ocrInstalled;   // "읽을 수 있는 언어" 표시
     private readonly CheckBox _checkUpdate;
@@ -129,6 +130,7 @@ internal sealed class SettingsForm : Form
         _autoCopy = CreateCheck("번역이 끝나면 번역문을 자동 복사");
         _reuseWindow = CreateCheck("같은 창에 계속 표시");
         _closeOnEsc = CreateCheck("Esc 키로 창 닫기");
+        _keepFocus = CreateCheck("쓰던 프로그램의 포커스 유지 (게임 권장)");
         _startupNotice = CreateCheck("시작할 때 Windows 알림 표시");
 
         // ---- 크기 ----
@@ -193,6 +195,9 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "결과 창", _reuseWindow);
         AddHint(grid, "끄면 캡처할 때마다 새 창이 열립니다");
         AddRow(grid, "", _closeOnEsc);
+        AddRow(grid, "", _keepFocus);
+        AddHint(grid, "켜면 번역 창이 떠도 게임이 멈추지 않습니다");
+        AddHint(grid, "원문 편집·Esc 닫기는 번역 창을 클릭한 뒤 가능");
         AddRow(grid, "자동 닫힘(초)", _autoClose);
         AddHint(grid, "0 = 닫지 않음. 마우스가 창 위에 있으면 안 닫힘");
         AddRow(grid, "", _autoCopy);
@@ -379,6 +384,7 @@ internal sealed class SettingsForm : Form
             _autoCopy.Checked = c.CopyTranslation;
             _reuseWindow.Checked = c.ReuseWindow;
             _closeOnEsc.Checked = c.CloseOnEsc;
+            _keepFocus.Checked = c.KeepFocusOnApp;
             _checkUpdate.Checked = c.CheckUpdateOnStart;
             _startupNotice.Checked = c.ShowStartupNotice;
 
@@ -427,6 +433,7 @@ internal sealed class SettingsForm : Form
         c.CopyTranslation = _autoCopy.Checked;
         c.ReuseWindow = _reuseWindow.Checked;
         c.CloseOnEsc = _closeOnEsc.Checked;
+        c.KeepFocusOnApp = _keepFocus.Checked;
         c.CheckUpdateOnStart = _checkUpdate.Checked;
         c.ShowStartupNotice = _startupNotice.Checked;
 

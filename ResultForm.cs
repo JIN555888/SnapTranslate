@@ -13,6 +13,12 @@ internal sealed class ResultForm : Form
     private Bitmap? _crop;            // 원문 언어를 바꾸면 다시 인식하려고 들고 있는다(미리보기는 없음)
     private readonly bool _preview;
     private Rectangle _anchor;
+    private readonly bool _keepFocus;      // 창이 포커스를 가져가지 않는 모드(창을 만들 때 정해지고 바뀌지 않는다)
+    private readonly Button _floatClose;  // 제목 줄을 숨겼을 때 내용 위에 겹쳐 보이는 닫기 단추
+
+    /// <summary>모양 점검용: 창을 화면 밖 좌표에 띄운다</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool TestOffscreen { get; set; }
     private readonly Font _titleFont = new(Theme.FontName, 9f, FontStyle.Bold);
     private ToolStripItem? _closeMenuItem;   // 우클릭 메뉴의 닫기 항목(Esc 설정에 따라 문구가 바뀐다)
 
@@ -55,6 +61,7 @@ internal sealed class ResultForm : Form
         _crop = crop;
         _anchor = anchor;
         _preview = preview;
+        _keepFocus = config.KeepFocusOnApp;
 
         Text = "SnapTranslate";
         Font = new Font(Theme.FontName, 10f);
@@ -62,7 +69,8 @@ internal sealed class ResultForm : Form
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         if (preview) TopLevel = false;   // 설정 창 안에 넣는 자식 창
-        else TopMost = true;
+        // TopMost 속성은 창을 띄울 때 포커스를 가져오므로, 포커스 유지 모드에서는 CreateParams 의 확장 스타일로 맨 위에 둔다
+        else if (!config.KeepFocusOnApp) TopMost = true;
         ShowInTaskbar = false;
         KeyPreview = true;
         ForeColor = Theme.Text;
@@ -164,6 +172,17 @@ internal sealed class ResultForm : Form
         _root.Controls.Add(_bottom, 0, 3);
         Controls.Add(_root);
 
+        // 제목 줄을 숨겼을 때 쓰는 닫기 단추. 배치 표에 넣지 않고 창 위에 직접 올려 내용과 겹치게 한다
+        _floatClose = CreateTitleButton("✕");
+        _floatClose.Dock = DockStyle.None;
+        _floatClose.Size = new Size(22, 20);
+        _floatClose.Font = new Font("Segoe UI Symbol", 8f);
+        _floatClose.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _floatClose.FlatAppearance.MouseOverBackColor = Theme.Danger;
+        _floatClose.Visible = false;
+        Controls.Add(_floatClose);
+        _floatClose.BringToFront();
+
         if (preview)
         {
             // 미리보기는 모양만 보여 주므로 예시 글을 넣고 동작은 연결하지 않는다
@@ -202,6 +221,7 @@ internal sealed class ResultForm : Form
     private void WireEvents(Action openSettings)
     {
         _close.Click += (_, _) => Close();
+        _floatClose.Click += (_, _) => Close();
         _settings.Click += (_, _) => openSettings();
 
         // 제목 줄을 숨겨도 창을 옮길 수 있게 칸 여백·칸 제목도 끌 수 있게 한다
@@ -317,8 +337,32 @@ internal sealed class ResultForm : Form
         {
             var cp = base.CreateParams;
             if (!_preview) cp.ClassStyle |= 0x20000; // CS_DROPSHADOW (최상위 창만 가능)
+            if (!_preview && _keepFocus) cp.ExStyle |= 0x00000008; // WS_EX_TOPMOST
             return cp;
         }
+    }
+
+    /// <summary>
+    /// 포커스 유지 모드에서는 창을 띄워도 원래 쓰던 프로그램(게임 등)의 포커스를 빼앗지 않는다.
+    /// 창을 클릭하면 그때 포커스를 받으므로 원문 편집·Esc 닫기는 클릭한 뒤에 쓸 수 있다.
+    /// </summary>
+    protected override bool ShowWithoutActivation => _keepFocus && !_preview;
+
+    /// <summary>
+    /// "같은 창에 계속 표시" 설정이면 닫을 때 창을 없애지 않고 숨기기만 한다.
+    /// 창을 새로 만드는 데 0.4~0.6초가 걸려(진단 기록으로 확인) 매번 만들면 번역이 그만큼 늦게 뜬다.
+    /// </summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_preview && !TestOffscreen && _config.ReuseWindow && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            _generation++;            // 진행 중이던 인식·번역 결과는 버린다
+            _autoCloseArmed = false;
+            Hide();
+            DebugLog.Write("결과 창 숨김");
+        }
+        base.OnFormClosing(e);
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -335,7 +379,8 @@ internal sealed class ResultForm : Form
         _controlsReady = true;
         ApplyLayout();
         if (_preview) return;
-        Location = Place();
+        // 모양 점검 때는 화면 밖에 띄운다(실제 화면에 번쩍이지 않게)
+        Location = TestOffscreen ? new Point(-30000, -30000) : Place();
         _layoutReady = true;
         _closeTimer.Start();
     }
@@ -415,10 +460,13 @@ internal sealed class ResultForm : Form
         _copy.FlatAppearance.MouseDownBackColor = accent;
 
         // 표시 항목
-        // 제목 줄을 숨겨도 닫을 수 있게, 오른쪽 위 닫기 단추만 있는 얇은 줄은 남긴다(빈 곳을 끌면 창 이동)
-        SetRow(0, _titleBar, true, _config.ShowTitleBar ? _rowHeights[0] : (float)Math.Round(_rowHeights[0] * 0.7f));
-        _title.Text = _config.ShowTitleBar ? "SnapTranslate" : "";
-        _settings.Visible = _config.ShowTitleBar;
+        // 제목 줄을 숨기면 줄 자체는 없애고(위쪽 여백이 생기지 않게), 닫기 단추만 내용 오른쪽 위에 겹쳐 띄운다
+        SetRow(0, _titleBar, _config.ShowTitleBar, _rowHeights[0]);
+        _floatClose.Visible = !_config.ShowTitleBar;
+        _floatClose.BackColor = _config.ShowLanguageRow ? back : card;   // 바로 밑에 깔리는 부분의 색에 맞춘다
+        _floatClose.ForeColor = label;
+        _floatClose.Location = new Point(ClientSize.Width - Padding.Right - _floatClose.Width - 6, Padding.Top + 6);
+        _floatClose.BringToFront();
         if (_closeMenuItem != null) _closeMenuItem.Text = _config.CloseOnEsc ? "닫기 (Esc)" : "닫기";
         SetRow(1, _langRow, _config.ShowLanguageRow, _rowHeights[1]);
         SetRow(3, _bottom, _config.ShowBottomBar, _rowHeights[2]);
@@ -608,7 +656,8 @@ internal sealed class ResultForm : Form
 
         // "직접 지정"은 사용자가 놓은 자리를 그대로 두고, 나머지는 새 선택 영역 기준으로 다시 놓는다
         if (_config.PositionMode != "Custom") Location = Place();
-        Activate();
+        if (!Visible) Show();   // 닫아서 숨겨 둔 창이면 다시 보인다
+        if (!_keepFocus) Activate();
         Start();
     }
 

@@ -156,8 +156,11 @@ internal static class OcrService
         switch (ScriptOf(tag))
         {
             case Script.Hangul: return hangul * weight;
-            // 가나가 있으면 일본어, 한자뿐이면 중국어 쪽이 이기게 한다
-            case Script.Japanese: return kana > 0 ? (kana + han) * weight + 0.5 : han * weight - 0.5;
+            // 가나가 충분히 섞여 있으면 일본어, 한자 위주면 중국어 쪽이 이기게 한다.
+            // 중국어 글을 일본어 엔진으로 읽으면 한자 몇 개가 가나로 잘못 읽히므로(실측: 12자 중 1자), 가나가 조금 있는 것만으로는 일본어로 보지 않는다
+            case Script.Japanese:
+                bool enoughKana = kana + han > 0 && (double)kana / (kana + han) >= 0.15;
+                return enoughKana ? (kana + han) * weight + 0.5 : han * weight - 0.5;
             case Script.Chinese: return han * weight;
             case Script.Cyrillic: return cyrillic * weight;
             case Script.Thai: return thai * weight;
