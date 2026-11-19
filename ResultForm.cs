@@ -14,7 +14,6 @@ internal sealed class ResultForm : Form
     private readonly bool _preview;
     private Rectangle _anchor;
     private readonly Font _titleFont = new(Theme.FontName, 9f, FontStyle.Bold);
-    private readonly Font _hintFont = new(Theme.FontName, 8f);
     private ToolStripItem? _closeMenuItem;   // 우클릭 메뉴의 닫기 항목(Esc 설정에 따라 문구가 바뀐다)
 
     private readonly TableLayoutPanel _root;
@@ -69,7 +68,7 @@ internal sealed class ResultForm : Form
         ForeColor = Theme.Text;
         Padding = new Padding(ResizeGrip);   // 가장자리를 비워 두어 크기 조절 손잡이로 쓴다
         ClientSize = new Size(560, 400);
-        MinimumSize = new Size(200, 120);
+        MinimumSize = new Size(80, 40);
 
         // ---- 제목 줄 ----
         _title = new Label
@@ -120,8 +119,8 @@ internal sealed class ResultForm : Form
             Orientation = Orientation.Horizontal,
             FixedPanel = FixedPanel.Panel1,   // 창 세로를 늘리면 번역 칸이 늘어난다
             SplitterWidth = 6,
-            Panel1MinSize = 50,
-            Panel2MinSize = 60,
+            Panel1MinSize = AppConfig.MinPaneHeight,
+            Panel2MinSize = AppConfig.MinPaneHeight,
             Margin = Padding.Empty,
             TabStop = false,
             IsSplitterFixed = preview,
@@ -418,11 +417,7 @@ internal sealed class ResultForm : Form
         // 표시 항목
         // 제목 줄을 숨겨도 닫을 수 있게, 오른쪽 위 닫기 단추만 있는 얇은 줄은 남긴다(빈 곳을 끌면 창 이동)
         SetRow(0, _titleBar, true, _config.ShowTitleBar ? _rowHeights[0] : (float)Math.Round(_rowHeights[0] * 0.7f));
-        // Esc 로 닫을 수 있다는 것을 제목 자리에 알려 준다(Esc 닫기를 끄면 표시하지 않는다)
-        string escHint = _config.CloseOnEsc ? "Esc 닫기" : "";
-        _title.Text = !_config.ShowTitleBar ? escHint
-            : escHint.Length > 0 ? "SnapTranslate   ·   " + escHint : "SnapTranslate";
-        _title.Font = _config.ShowTitleBar ? _titleFont : _hintFont;
+        _title.Text = _config.ShowTitleBar ? "SnapTranslate" : "";
         _settings.Visible = _config.ShowTitleBar;
         if (_closeMenuItem != null) _closeMenuItem.Text = _config.CloseOnEsc ? "닫기 (Esc)" : "닫기";
         SetRow(1, _langRow, _config.ShowLanguageRow, _rowHeights[1]);
@@ -574,7 +569,11 @@ internal sealed class ResultForm : Form
             return;
         }
         _idleMs += _closeTimer.Interval;
-        if (_idleMs >= _config.AutoCloseSeconds * 1000) Close();
+        if (_idleMs >= _config.AutoCloseSeconds * 1000)
+        {
+            DebugLog.Write("결과 창 자동 닫힘");
+            Close();
+        }
     }
 
     /// <summary>결과가 나온 시점부터 자동 닫힘 시간을 다시 잰다</summary>
@@ -625,22 +624,24 @@ internal sealed class ResultForm : Form
         string note = "";
         try
         {
-            string[] languages;
+            string[]? languages;   // 빈 배열 = 설치된 모든 언어로 읽어 가장 맞는 것을 고름, null = 다시 인식하지 않음
             if (source == "auto")
-                languages = _config.OcrLanguages;
-            else if (OcrService.IsAvailable(source))
+                languages = [];
+            else if (OcrService.CanRead(source))
                 languages = [source];
             else
             {
                 // 그 언어의 OCR 이 없으면 다시 인식하지 않고 번역 쪽 원문 언어만 바꾼다
-                languages = [];
+                languages = null;
                 note = $" · {Theme.LangName(source)} OCR 미설치";
             }
 
-            if (languages.Length > 0 || _original.Text.Length == 0)
+            if (languages != null || _original.Text.Length == 0)
             {
                 _status.Text = "글자 인식 중…";
-                var ocr = await OcrService.RecognizeAsync(_crop, languages.Length > 0 ? languages : _config.OcrLanguages);
+                var ocrTimer = System.Diagnostics.Stopwatch.StartNew();
+                var ocr = await OcrService.RecognizeAsync(_crop, languages ?? []);
+                DebugLog.Write($"글자 인식 {_crop.Width}x{_crop.Height} {ocrTimer.ElapsedMilliseconds}ms 글자수={ocr.Text.Length} 엔진={ocr.Language}");
                 if (IsDisposed || generation != _generation) return;
                 SetText(_original, ocr.Text);
             }
@@ -677,7 +678,9 @@ internal sealed class ResultForm : Form
         _status.Text = "번역 중…";
         try
         {
+            var translateTimer = System.Diagnostics.Stopwatch.StartNew();
             var result = await Translator.TranslateAsync(text, source, target, alt);
+            DebugLog.Write($"번역 {translateTimer.ElapsedMilliseconds}ms 글자수={result.Text.Length} 맨 앞 창: {DebugLog.Foreground()}");
             if (IsDisposed || generation != _generation) return;
 
             SetText(_translated, result.Text);
@@ -737,7 +740,6 @@ internal sealed class ResultForm : Form
         if (disposing)
         {
             _titleFont.Dispose();
-            _hintFont.Dispose();
             _closeTimer.Dispose();
             _crop?.Dispose();
         }

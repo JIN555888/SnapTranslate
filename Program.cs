@@ -57,9 +57,6 @@ internal sealed class AppConfig
     /// <summary>원문이 이미 TargetLang 이면 이 언어로 번역한다</summary>
     public string AltTargetLang { get; set; } = "en";
 
-    /// <summary>OCR 에 쓸 언어(Windows 에 설치된 OCR 언어만 동작). 앞쪽이 우선</summary>
-    public string[] OcrLanguages { get; set; } = ["ko", "en"];
-
     /// <summary>번역이 끝나면 번역문을 클립보드에 자동 복사</summary>
     public bool CopyTranslation { get; set; } = false;
 
@@ -68,6 +65,9 @@ internal sealed class AppConfig
 
     /// <summary>결과 창에서 Esc 를 누르면 창을 닫을지</summary>
     public bool CloseOnEsc { get; set; } = true;
+
+    /// <summary>멈춤·지연 원인을 찾는 진단 기록을 실행 파일 옆 debug.log 에 남길지(기본은 끔)</summary>
+    public bool DebugLog { get; set; } = false;
 
     /// <summary>프로그램을 시작할 때 Windows 알림으로 단축키 안내를 보일지(기본은 끔)</summary>
     public bool ShowStartupNotice { get; set; } = false;
@@ -156,6 +156,10 @@ internal sealed class AppConfig
     public bool ShowOriginal { get; set; } = true;
     public bool ShowTranslated { get; set; } = true;
 
+    /// <summary>결과 창 가로와 원문·번역 칸 세로의 최소 크기(100% 배율 기준 픽셀). 작게 쓰고 싶은 경우를 위해 낮게 둔다</summary>
+    public const int MinWidth = 120;
+    public const int MinPaneHeight = 20;
+
     /// <summary>값이 허용 범위를 벗어나면 범위 안으로 맞춘다</summary>
     public void Normalize()
     {
@@ -164,9 +168,9 @@ internal sealed class AppConfig
         OriginalFontSize = Math.Clamp(OriginalFontSize, 6, 40);
         TranslatedFontSize = Math.Clamp(TranslatedFontSize, 6, 40);
         Opacity = Math.Clamp(Opacity, 30, 100);
-        WindowWidth = Math.Clamp(WindowWidth, 400, 2000);
-        OriginalHeight = Math.Clamp(OriginalHeight, 50, 1000);
-        TranslatedHeight = Math.Clamp(TranslatedHeight, 60, 1200);
+        WindowWidth = Math.Clamp(WindowWidth, MinWidth, 2000);
+        OriginalHeight = Math.Clamp(OriginalHeight, MinPaneHeight, 1000);
+        TranslatedHeight = Math.Clamp(TranslatedHeight, MinPaneHeight, 1200);
     }
 
     public void Save()
@@ -288,7 +292,8 @@ internal sealed class TrayContext : ApplicationContext
     private readonly HotkeyWindow _hotkey = new();
     private bool _capturing;
     private bool _settingsOpen;
-    private UpdateResult? _pendingUpdate;   // 시작할 때 찾은 새 버전(알림을 누르면 설치)
+    private readonly HitchWatcher _hitchWatcher = new();   // 진단 기록이 켜져 있을 때만 동작
+    private UpdateResult? _pendingUpdate;  // 시작할 때 찾은 새 버전(알림을 누르면 설치)
     private readonly ToolStripItem _updateItem;
     private ResultForm? _lastResult;  // 가장 최근에 연 결과 창(같은 창 재사용용)
     private readonly ToolStripItem _captureItem;
@@ -297,6 +302,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         _config = AppConfig.Load(out string? configError);
         _config.Normalize();
+        DebugLog.Enabled = _config.DebugLog;
 
         var menu = new ContextMenuStrip();
         _captureItem = menu.Items.Add($"영역 캡처 번역 ({_config.Hotkey})", null, (_, _) => StartCapture());
@@ -395,19 +401,29 @@ internal sealed class TrayContext : ApplicationContext
         _capturing = true;
         try
         {
+            DebugLog.Write($"=== 단축키 (v{AppInfo.VersionText}) 맨 앞 창: {DebugLog.Foreground()}");
+            _hitchWatcher.Start();
+            var timer = Stopwatch.StartNew();
+
             // 전체 가상 화면(모든 모니터)을 먼저 찍고, 그 그림 위에서 영역을 고르게 한다
             Rectangle screen = SystemInformation.VirtualScreen;
             using var shot = new Bitmap(screen.Width, screen.Height, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(shot))
                 g.CopyFromScreen(screen.Location, Point.Empty, screen.Size);
+            DebugLog.Write($"화면 찍기 {screen.Width}x{screen.Height} {timer.ElapsedMilliseconds}ms");
 
             Rectangle selection;
+            timer.Restart();
             using (var overlay = new OverlayForm(shot, screen))
             {
-                if (overlay.ShowDialog() != DialogResult.OK) return;
+                DebugLog.Write($"선택 화면 준비 {timer.ElapsedMilliseconds}ms");
+                DialogResult picked = overlay.ShowDialog();
+                DebugLog.Write($"선택 끝 결과={picked} 영역={overlay.Selection.Width}x{overlay.Selection.Height}");
+                if (picked != DialogResult.OK) return;
                 selection = overlay.Selection;
             }
             if (selection.Width < 5 || selection.Height < 5) return;
+            _hitchWatcher.Start();   // 선택에 걸린 시간은 빼고, 선택이 끝난 시점부터 다시 감시한다
 
             // 잘라 낸 그림은 결과 창이 가져간다(원문 언어를 바꾸면 다시 인식해야 하므로)
             var crop = shot.Clone(selection, shot.PixelFormat);
@@ -416,14 +432,17 @@ internal sealed class TrayContext : ApplicationContext
             // "같은 창에 계속 표시" 설정이면 열려 있는 결과 창에 새 캡처를 넣는다
             if (_config.ReuseWindow && _lastResult is { IsDisposed: false })
             {
+                DebugLog.Write("결과 창 재사용");
                 _lastResult.LoadCapture(crop, anchor);
                 return;
             }
 
+            timer.Restart();
             var result = new ResultForm(_config, anchor, crop, OpenSettings);
             _lastResult = result;
             result.Show();
             result.Activate();
+            DebugLog.Write($"결과 창 새로 만들어 표시 {timer.ElapsedMilliseconds}ms");
             result.Start();
         }
         catch (Exception ex)
@@ -438,6 +457,7 @@ internal sealed class TrayContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        _hitchWatcher.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _hotkey.Dispose();
@@ -491,7 +511,9 @@ internal static class ShotTest
             var compact = new AppConfig { ShowTitleBar = false, ShowLanguageRow = false, ShowBottomBar = false, ShowCaptions = false };
             var translatedOnly = new AppConfig { ShowOriginal = false };
             var originalOnly = new AppConfig { ShowTranslated = false, ShowBottomBar = false };
-            foreach (var (name, cfg) in new[] { ("result.png", config), ("result-compact.png", compact), ("result-translated-only.png", translatedOnly), ("result-original-only.png", originalOnly) })
+            // 최소 크기 근처의 아주 작은 창
+            var tiny = new AppConfig { WindowWidth = 160, OriginalHeight = 20, TranslatedHeight = 40, ShowTitleBar = false, ShowLanguageRow = false, ShowBottomBar = false, ShowCaptions = false };
+            foreach (var (name, cfg) in new[] { ("result.png", config), ("result-compact.png", compact), ("result-translated-only.png", translatedOnly), ("result-original-only.png", originalOnly), ("result-tiny.png", tiny) })
             {
                 using var result = new ResultForm(cfg, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { Opacity = 0 };
                 // 점검 도중 창이 저절로 닫히면 어디서 닫았는지 남긴다
@@ -588,14 +610,26 @@ internal static class SelfTest
             // UI 스레드 동기화 컨텍스트와 얽히지 않게 작업 스레드에서 돌린다
             var (ocr, translated) = Task.Run(async () =>
             {
-                var o = await OcrService.RecognizeAsync(bmp, config.OcrLanguages);
+                var o = await OcrService.RecognizeAsync(bmp, []);
                 var t = await Translator.TranslateAsync(o.Text, config.SourceLang, config.TargetLang, config.AltTargetLang);
                 return (o, t);
             }).GetAwaiter().GetResult();
             UpdateResult update = Task.Run(UpdateService.CheckAsync).GetAwaiter().GetResult();
 
+            // 한글 그림은 한국어 엔진이, 영문 그림은 영어 엔진이 골라지는지(자동 감지) 확인한다
+            using var korean = new Bitmap(900, 80);
+            using (var g = Graphics.FromImage(korean))
+            using (var font = new Font("Malgun Gothic", 16))
+            {
+                g.Clear(Color.White);
+                g.DrawString("자동 저장이 켜져 있습니다. 진행 상황이 저장됩니다.", font, Brushes.Black, 20, 20);
+            }
+            OcrOutput koreanOcr = Task.Run(() => OcrService.RecognizeAsync(korean, [])).GetAwaiter().GetResult();
+
             File.WriteAllText(outputPath,
                 $"버전: {AppInfo.VersionText}\r\n업데이트 확인: {update.Message} (최신 {update.LatestVersion})\r\n" +
+                $"읽을 수 있는 언어: {string.Join(", ", OcrService.InstalledLanguageNames())}\r\n" +
+                $"한글 그림 → 엔진 {koreanOcr.Language}: {koreanOcr.Text}\r\n" +
                 $"OCR 언어: {ocr.Language}\r\nOCR 결과: {ocr.Text}\r\n감지 언어: {translated.SourceLang}\r\n번역: {translated.Text}\r\n");
             return 0;
         }

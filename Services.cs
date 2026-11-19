@@ -25,46 +25,86 @@ internal static class OcrService
         if (engines.Count == 0)
             throw new InvalidOperationException("사용할 수 있는 Windows OCR 언어가 없습니다. Windows 설정 > 시간 및 언어 > 언어에서 언어 팩(광학 문자 인식)을 설치하세요.");
 
-        // 라틴 문자가 아닌 언어(한글·일본어 등)를 먼저 돌려, 자기 문자가 충분히 나오면 그 결과를 쓴다.
-        // 아니면 라틴 계열 엔진 결과를 쓴다(한국어 엔진보다 영문 인식이 정확하다).
-        OcrOutput? fallback = null;
-        foreach (var (tag, engine) in engines.OrderBy(e => IsLatin(e.Tag) ? 1 : 0))
+        // 엔진이 하나면 그 결과를 그대로 쓴다
+        if (engines.Count == 1)
+        {
+            var only = await engines[0].Engine.RecognizeAsync(software);
+            return new OcrOutput(BuildText(only, engines[0].Tag), engines[0].Tag);
+        }
+
+        // 여러 엔진으로 모두 읽어 보고, "그 언어의 문자가 가장 많이 나온" 결과를 고른다.
+        // (예: 일본어 글을 영어 엔진으로 읽으면 엉뚱한 알파벳이 조금 나오고, 일본어 엔진으로 읽으면 가나·한자가 많이 나온다)
+        OcrOutput? best = null;
+        double bestScore = 0;
+        foreach (var (tag, engine) in engines)
         {
             var result = await engine.RecognizeAsync(software);
             string text = BuildText(result, tag);
             if (text.Length == 0) continue;
-            var output = new OcrOutput(text, tag);
-            if (IsLatin(tag)) return output;
-            if (OwnScriptRatio(text, tag) >= 0.3) return output;
-            fallback ??= output;
+            double score = Score(text, tag);
+            if (best == null || score > bestScore)
+            {
+                best = new OcrOutput(text, tag);
+                bestScore = score;
+            }
         }
-        return fallback ?? new OcrOutput("", engines[0].Tag);
+        return best ?? new OcrOutput("", engines[0].Tag);
     }
+
+    /// <summary>Windows 에 설치돼 있어 글자를 읽을 수 있는 언어 이름들</summary>
+    public static string[] InstalledLanguageNames() =>
+        OcrEngine.AvailableRecognizerLanguages.Select(l => l.DisplayName).ToArray();
 
     /// <summary>해당 언어의 OCR 이 Windows 에 설치돼 있는지</summary>
     public static bool IsAvailable(string language) => FindLanguage(language) != null;
 
+    /// <summary>그 언어의 글을 읽을 수 있는지(전용 엔진이 없어도 알파벳을 쓰는 언어는 영어 엔진으로 읽는다)</summary>
+    public static bool CanRead(string language) =>
+        IsAvailable(language) || (ScriptOf(language) == Script.Latin && IsAvailable("en"));
+
     private static Language? FindLanguage(string want)
     {
-        // 번역 언어 코드와 OCR 언어 태그가 다른 것(중국어)을 맞춘다
+        // 번역 언어 코드와 OCR 언어 태그가 다른 것(중국어·필리핀어)을 맞춘다
         if (want.Equals("zh-CN", StringComparison.OrdinalIgnoreCase)) want = "zh-Hans";
         else if (want.Equals("zh-TW", StringComparison.OrdinalIgnoreCase)) want = "zh-Hant";
+        else if (want.Equals("tl", StringComparison.OrdinalIgnoreCase)) want = "fil";
         // "en" 으로 적어도 설치된 "en-US" 를 찾도록 앞부분으로 맞춘다
         return OcrEngine.AvailableRecognizerLanguages.FirstOrDefault(l =>
             l.LanguageTag.Equals(want, StringComparison.OrdinalIgnoreCase) ||
             l.LanguageTag.StartsWith(want + "-", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// 쓸 OCR 엔진을 만든다. preferred 가 비어 있으면(자동 감지) 설치된 모든 언어를 쓴다.
+    /// 언어를 지정했는데 그 언어의 엔진이 없으면, 알파벳을 쓰는 언어(필리핀어·베트남어 등)는 영어 엔진으로 대신 읽는다.
+    /// </summary>
     private static List<(string Tag, OcrEngine Engine)> CreateEngines(string[] preferred)
     {
         var list = new List<(string, OcrEngine)>();
-        foreach (var want in preferred)
+
+        void Add(Language? language)
         {
-            Language? match = FindLanguage(want);
-            if (match == null || list.Any(e => e.Item1 == match.LanguageTag)) continue;
-            var engine = OcrEngine.TryCreateFromLanguage(match);
-            if (engine != null) list.Add((match.LanguageTag, engine));
+            if (language == null || list.Any(e => e.Item1 == language.LanguageTag)) return;
+            var engine = OcrEngine.TryCreateFromLanguage(language);
+            if (engine != null) list.Add((language.LanguageTag, engine));
         }
+
+        if (preferred.Length == 0)
+        {
+            // 점수가 같을 때 앞쪽이 이기므로 영어를 맨 앞에 둔다(알파벳 글은 영어 엔진이 기본)
+            foreach (var language in OcrEngine.AvailableRecognizerLanguages.OrderBy(l => l.LanguageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? 0 : 1))
+                Add(language);
+        }
+        else
+        {
+            foreach (string want in preferred)
+            {
+                Language? match = FindLanguage(want);
+                if (match == null && ScriptOf(want) == Script.Latin) match = FindLanguage("en");
+                Add(match);
+            }
+        }
+
         if (list.Count == 0)
         {
             var engine = OcrEngine.TryCreateFromUserProfileLanguages();
@@ -73,33 +113,64 @@ internal static class OcrService
         return list;
     }
 
-    private static bool IsLatin(string tag) =>
-        !(tag.StartsWith("ko", StringComparison.OrdinalIgnoreCase) ||
-          tag.StartsWith("ja", StringComparison.OrdinalIgnoreCase) ||
-          tag.StartsWith("zh", StringComparison.OrdinalIgnoreCase));
+    private enum Script { Latin, Hangul, Japanese, Chinese, Cyrillic, Thai }
+
+    /// <summary>언어 태그(코드)가 쓰는 문자 종류</summary>
+    private static Script ScriptOf(string tag)
+    {
+        string lang = tag.Split('-')[0].ToLowerInvariant();
+        return lang switch
+        {
+            "ko" => Script.Hangul,
+            "ja" => Script.Japanese,
+            "zh" => Script.Chinese,
+            "ru" or "uk" or "bg" or "be" or "mk" or "kk" => Script.Cyrillic,
+            "th" => Script.Thai,
+            _ => Script.Latin,
+        };
+    }
+
+    /// <summary>
+    /// 인식 결과가 그 엔진의 언어다운 정도. 그 언어의 문자 수를 세되,
+    /// 알파벳이 아닌 문자에는 가중치를 준다(다른 문자를 영어 엔진으로 읽어 나온 엉뚱한 알파벳에 지지 않게).
+    /// </summary>
+    private static double Score(string text, string tag)
+    {
+        int hangul = 0, kana = 0, han = 0, cyrillic = 0, thai = 0, latin = 0, vietnamese = 0;
+        foreach (char c in text)
+        {
+            if (c is >= '가' and <= '힣' or >= 'ㄱ' and <= 'ㆎ') hangul++;
+            else if (c is >= '぀' and <= 'ヿ') kana++;
+            else if (c is >= '一' and <= '鿿') han++;
+            else if (c is >= 'Ѐ' and <= 'ӿ') cyrillic++;
+            else if (c is >= '฀' and <= '๿') thai++;
+            else if (char.IsLetter(c) && (c < 'ɐ' || c is >= 'Ḁ' and <= 'ỿ'))
+            {
+                latin++;
+                // 베트남어에만 주로 쓰이는 글자(성조 붙은 모음, đ ơ ư ă)
+                if (c is >= 'Ạ' and <= 'ỹ' or 'đ' or 'Đ' or 'ơ' or 'Ơ' or 'ư' or 'Ư' or 'ă' or 'Ă') vietnamese++;
+            }
+        }
+
+        const double weight = 1.5;
+        switch (ScriptOf(tag))
+        {
+            case Script.Hangul: return hangul * weight;
+            // 가나가 있으면 일본어, 한자뿐이면 중국어 쪽이 이기게 한다
+            case Script.Japanese: return kana > 0 ? (kana + han) * weight + 0.5 : han * weight - 0.5;
+            case Script.Chinese: return han * weight;
+            case Script.Cyrillic: return cyrillic * weight;
+            case Script.Thai: return thai * weight;
+            default:
+                // 베트남어 엔진은 베트남어 글자가 실제로 있을 때만 영어 엔진보다 앞선다
+                bool isVietnamese = tag.StartsWith("vi", StringComparison.OrdinalIgnoreCase);
+                return latin + (isVietnamese ? vietnamese * 0.5 : 0);
+        }
+    }
 
     private static bool IsCjkNoSpace(string tag) =>
         tag.StartsWith("ja", StringComparison.OrdinalIgnoreCase) ||
         tag.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>공백을 뺀 글자 중 해당 언어 고유 문자의 비율</summary>
-    private static double OwnScriptRatio(string text, string tag)
-    {
-        int total = 0, own = 0;
-        foreach (char c in text)
-        {
-            if (char.IsWhiteSpace(c)) continue;
-            total++;
-            bool hangul = c is >= '가' and <= '힣' or >= 'ㄱ' and <= 'ㆎ';
-            bool kana = c is >= '぀' and <= 'ヿ';
-            bool han = c is >= '一' and <= '鿿';
-            if (tag.StartsWith("ko", StringComparison.OrdinalIgnoreCase) ? hangul
-                : tag.StartsWith("ja", StringComparison.OrdinalIgnoreCase) ? (kana || han)
-                : han)
-                own++;
-        }
-        return total == 0 ? 0 : (double)own / total;
-    }
 
     /// <summary>줄 간격을 보고 같은 문단의 줄은 이어 붙이고, 간격이 넓으면 문단을 나눈다</summary>
     private static string BuildText(OcrResult result, string tag)
