@@ -558,3 +558,38 @@ internal sealed class BusyDots : Control
         }
     }
 }
+
+/// <summary>창을 끌어 옮기는 동그란 손잡이. 제목 줄을 숨겼을 때 창 왼쪽 위에 놓는다</summary>
+internal sealed class DragDot : Control
+{
+    private bool _hover;
+
+    public DragDot()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        TabStop = false;
+        Cursor = Cursors.SizeAll;
+        Size = new Size(16, 16);
+    }
+
+    /// <summary>평소 색(마우스를 올리면 강조색이 된다)</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Color DotColor { get; set; } = Theme.SubText;
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Color HoverColor { get; set; } = Theme.Accent;
+
+    protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hover = true; Invalidate(); }
+    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hover = false; Invalidate(); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.Clear(BackColor);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        // 누를 자리는 넉넉하게 두고, 그 안에 조금 작은 원을 그린다
+        int size = Math.Min(Width, Height) - 5;
+        var circle = new Rectangle((Width - size) / 2, (Height - size) / 2, size, size);
+        using var brush = new SolidBrush(_hover ? HoverColor : DotColor);
+        e.Graphics.FillEllipse(brush, circle);
+    }
+}
