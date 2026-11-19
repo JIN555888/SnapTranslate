@@ -13,6 +13,11 @@ internal sealed class ResultForm : Form
     private Bitmap? _crop;            // 원문 언어를 바꾸면 다시 인식하려고 들고 있는다(미리보기는 없음)
     private readonly bool _preview;
     private Rectangle _anchor;
+    private readonly Button _floatClose;   // 제목 줄을 숨겼을 때 내용 위에 겹쳐 보이는 닫기 단추
+
+    /// <summary>모양 점검용: 창을 화면 밖 좌표에 띄운다</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool TestOffscreen { get; set; }
     private readonly Font _titleFont = new(Theme.FontName, 9f, FontStyle.Bold);
     private ToolStripItem? _closeMenuItem;   // 우클릭 메뉴의 닫기 항목(Esc 설정에 따라 문구가 바뀐다)
 
@@ -164,6 +169,17 @@ internal sealed class ResultForm : Form
         _root.Controls.Add(_bottom, 0, 3);
         Controls.Add(_root);
 
+        // 제목 줄을 숨겼을 때 쓰는 닫기 단추. 배치 표에 넣지 않고 창 위에 직접 올려 내용과 겹치게 한다
+        _floatClose = CreateTitleButton("✕");
+        _floatClose.Dock = DockStyle.None;
+        _floatClose.Size = new Size(22, 20);
+        _floatClose.Font = new Font("Segoe UI Symbol", 8f);
+        _floatClose.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _floatClose.FlatAppearance.MouseOverBackColor = Theme.Danger;
+        _floatClose.Visible = false;
+        Controls.Add(_floatClose);
+        _floatClose.BringToFront();
+
         if (preview)
         {
             // 미리보기는 모양만 보여 주므로 예시 글을 넣고 동작은 연결하지 않는다
@@ -202,6 +218,7 @@ internal sealed class ResultForm : Form
     private void WireEvents(Action openSettings)
     {
         _close.Click += (_, _) => Close();
+        _floatClose.Click += (_, _) => Close();
         _settings.Click += (_, _) => openSettings();
 
         // 제목 줄을 숨겨도 창을 옮길 수 있게 칸 여백·칸 제목도 끌 수 있게 한다
@@ -335,7 +352,8 @@ internal sealed class ResultForm : Form
         _controlsReady = true;
         ApplyLayout();
         if (_preview) return;
-        Location = Place();
+        // 모양 점검 때는 화면 밖에 띄운다(실제 화면에 번쩍이지 않게)
+        Location = TestOffscreen ? new Point(-30000, -30000) : Place();
         _layoutReady = true;
         _closeTimer.Start();
     }
@@ -415,10 +433,13 @@ internal sealed class ResultForm : Form
         _copy.FlatAppearance.MouseDownBackColor = accent;
 
         // 표시 항목
-        // 제목 줄을 숨겨도 닫을 수 있게, 오른쪽 위 닫기 단추만 있는 얇은 줄은 남긴다(빈 곳을 끌면 창 이동)
-        SetRow(0, _titleBar, true, _config.ShowTitleBar ? _rowHeights[0] : (float)Math.Round(_rowHeights[0] * 0.7f));
-        _title.Text = _config.ShowTitleBar ? "SnapTranslate" : "";
-        _settings.Visible = _config.ShowTitleBar;
+        // 제목 줄을 숨기면 줄 자체는 없애고(위쪽 여백이 생기지 않게), 닫기 단추만 내용 오른쪽 위에 겹쳐 띄운다
+        SetRow(0, _titleBar, _config.ShowTitleBar, _rowHeights[0]);
+        _floatClose.Visible = !_config.ShowTitleBar;
+        _floatClose.BackColor = _config.ShowLanguageRow ? back : card;   // 바로 밑에 깔리는 부분의 색에 맞춘다
+        _floatClose.ForeColor = label;
+        _floatClose.Location = new Point(ClientSize.Width - Padding.Right - _floatClose.Width - 6, Padding.Top + 6);
+        _floatClose.BringToFront();
         if (_closeMenuItem != null) _closeMenuItem.Text = _config.CloseOnEsc ? "닫기 (Esc)" : "닫기";
         SetRow(1, _langRow, _config.ShowLanguageRow, _rowHeights[1]);
         SetRow(3, _bottom, _config.ShowBottomBar, _rowHeights[2]);

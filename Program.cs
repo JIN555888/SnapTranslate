@@ -515,7 +515,8 @@ internal static class ShotTest
             var tiny = new AppConfig { WindowWidth = 160, OriginalHeight = 20, TranslatedHeight = 40, ShowTitleBar = false, ShowLanguageRow = false, ShowBottomBar = false, ShowCaptions = false };
             foreach (var (name, cfg) in new[] { ("result.png", config), ("result-compact.png", compact), ("result-translated-only.png", translatedOnly), ("result-original-only.png", originalOnly), ("result-tiny.png", tiny) })
             {
-                using var result = new ResultForm(cfg, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { Opacity = 0 };
+                // 겹쳐 놓은 컨트롤까지 실제와 같게 찍으려고, 투명하게 만들지 않고 화면 밖에 띄워 창 내용을 그대로 받아 온다
+                using var result = new ResultForm(cfg, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { TestOffscreen = true };
                 // 점검 도중 창이 저절로 닫히면 어디서 닫았는지 남긴다
                 result.FormClosed += (_, _) => File.WriteAllText(Path.Combine(directory, "closed-" + name + ".txt"), Environment.StackTrace);
                 result.Show();
@@ -536,7 +537,7 @@ internal static class ShotTest
                 }
                 result.SetTexts(longText, "짧은 번역");
                 Application.DoEvents();
-                Save(result, Path.Combine(directory, name));
+                SaveComposed(result, Path.Combine(directory, name));
             }
             return 0;
         }
@@ -545,6 +546,25 @@ internal static class ShotTest
             File.WriteAllText(Path.Combine(directory, "error.txt"), ex.ToString());
             return 1;
         }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+
+    /// <summary>
+    /// 창을 화면에 합성된 모습 그대로 저장한다(겹친 컨트롤의 앞뒤 순서가 실제와 같다).
+    /// DrawToBitmap 은 겹친 컨트롤을 실제와 다른 순서로 그릴 수 있어, 겹침을 확인할 때는 이쪽을 쓴다.
+    /// </summary>
+    private static void SaveComposed(Form form, string path)
+    {
+        using var bitmap = new Bitmap(form.Width, form.Height);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            IntPtr dc = g.GetHdc();
+            try { PrintWindow(form.Handle, dc, 2 /*PW_RENDERFULLCONTENT*/); }
+            finally { g.ReleaseHdc(dc); }
+        }
+        bitmap.Save(path, ImageFormat.Png);
     }
 
     /// <param name="clientOnly">true 면 제목 표시줄·테두리를 빼고 창 안쪽만 저장한다</param>
