@@ -466,6 +466,10 @@ internal sealed class SettingsForm : Form
         Theme.StyleButton(_previewToggle, false);
         _previewToggle.Click += (_, _) => TogglePreview();
         buttons.Controls.Add(_previewToggle);
+        var resetAll = new Button { Text = "설정 초기화" };
+        Theme.StyleButton(resetAll, false);
+        resetAll.Click += (_, _) => ResetAll();
+        buttons.Controls.Add(resetAll);
 
         // Dock 은 나중에 넣은 컨트롤부터 자리를 잡는다: 아래 버튼 → 왼쪽 메뉴 → 항목 → 나머지를 미리보기가 채운다
         Controls.Add(_previewArea);
@@ -879,6 +883,37 @@ internal sealed class SettingsForm : Form
     }
 
     /// <summary>크기·글자·색·표시 항목을 처음 값으로 되돌린다(저장을 눌러야 실제로 적용된다)</summary>
+    /// <summary>
+    /// 모든 설정을 처음 설치했을 때의 값으로 되돌린다(저장을 눌러야 실제로 적용된다).
+    /// 사용자가 직접 넣은 자료(Gemini API 키, 용어집)는 설정이 아니므로 그대로 둔다.
+    /// </summary>
+    private void ResetAll()
+    {
+        if (MessageBox.Show(this,
+                "모든 설정을 처음 값으로 되돌릴까요?\n\n" +
+                "· 단축키, 언어, 번역기 순위, 창 위치·크기·글자·색, 표시 항목이 기본값이 됩니다.\n" +
+                "· Gemini API 키와 용어집은 그대로 둡니다.\n" +
+                "· 저장을 눌러야 적용됩니다. 취소를 누르면 되돌리지 않습니다.",
+                AppInfo.Name, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+
+        ReadControls(_draft);   // 지금 화면에 있는 키·용어집을 먼저 읽어 둔다
+        var defaults = new AppConfig
+        {
+            GeminiApiKey = _draft.GeminiApiKey,
+            Glossary = _draft.Glossary,
+            ShowSettingsPreview = _draft.ShowSettingsPreview,
+        };
+        LoadControls(defaults);
+        // 자동 실행은 설정 파일이 아니라 Windows 등록 상태를 보이므로 따로 끈다(기본값은 끔)
+        _loading = true;
+        _autostart.Checked = false;
+        _loading = false;
+
+        ReadControls(_draft);
+        _preview?.ApplyLayout();
+        _message.Text = "기본값으로 되돌렸습니다. 저장을 눌러야 적용됩니다.";
+    }
+
     private void ResetAppearance()
     {
         _draft.CopyAppearanceFrom(new AppConfig());
@@ -1113,6 +1148,7 @@ internal sealed class SettingsForm : Form
             _message.Text = "config.json 저장 실패: " + ex.Message;
             return;
         }
+        DebugLog.SetEnabled(_config.DebugLog, _config);
         DialogResult = DialogResult.OK;
     }
 }
