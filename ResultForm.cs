@@ -15,6 +15,7 @@ internal sealed class ResultForm : Form
     private Rectangle _anchor;
     private readonly bool _keepFocus;      // 창이 포커스를 가져가지 않는 모드(창을 만들 때 정해지고 바뀌지 않는다)
     private readonly Button _floatClose;  // 제목 줄을 숨겼을 때 내용 위에 겹쳐 보이는 닫기 단추
+    private readonly BusyDots _busyDots;  // "…중" 안내 뒤에서 움직이는 색 점
     private readonly Label _engineLabel;  // 어느 번역기로 번역했는지. 내용 오른쪽 아래에 겹쳐 보인다
     private string _engineName = "";      // 마지막 번역에 쓴 번역기 이름(번역 전·실패면 빈 값)
 
@@ -196,6 +197,9 @@ internal sealed class ResultForm : Form
             Visible = false,
         };
         Controls.Add(_engineLabel);
+        // 진행 중 안내 글 뒤에 붙는 색 점. 글 상자는 한 가지 색만 쓸 수 있어서 따로 그려 겹친다
+        _busyDots = new BusyDots { Visible = false };
+        Controls.Add(_busyDots);
         _split.SplitterMoved += (_, _) => PlaceEngineLabel();
         _split.SizeChanged += (_, _) => PlaceEngineLabel();
         VisibleChanged += (_, _) => PlaceEngineLabel();
@@ -281,32 +285,65 @@ internal sealed class ResultForm : Form
     /// </summary>
     private void ShowNote(string text) => ShowNote(text, false);
 
-    // 진행 중 표시에 붙여 움직이는 점. 멈춘 것이 아니라 일하는 중임을 보인다
-    private static readonly string[] BusyFrames = ["●○○", "○●○", "○○●", "○●○"];
+    // 진행 중 표시의 점이 강조되는 순서(왼쪽 → 오른쪽 → 다시 왼쪽). 멈춘 것이 아니라 일하는 중임을 보인다
+    private static readonly int[] BusySteps = [0, 1, 2, 1];
     private readonly System.Windows.Forms.Timer _busyTimer = new() { Interval = 300 };
-    private string _busyText = "";
-    private int _busyFrame;
+    private int _busyStep;
 
-    /// <summary>진행 중 안내를 움직이는 점과 함께 보인다. 다른 글(번역문·오류)이 들어오면 멈춘다</summary>
+    /// <summary>진행 중 안내를 움직이는 색 점과 함께 보인다. 다른 글(번역문·오류)이 들어오면 멈춘다</summary>
     private void ShowBusy(string text)
     {
-        _busyText = text;
-        _busyFrame = 0;
-        ShowNote($"{text}  {BusyFrames[0]}", true);
+        _busyStep = 0;
+        ShowNote(text, true);
+        _busyDots.Frame = BusySteps[0];
+        PlaceBusyDots();
         _busyTimer.Start();
     }
 
     private void OnBusyTick()
     {
-        // 사용자가 글을 고르는 중이거나 안내가 이미 바뀌었으면 건드리지 않는다
-        if (!_translatedIsNote || IsDisposed) { _busyTimer.Stop(); return; }
-        _busyFrame = (_busyFrame + 1) % BusyFrames.Length;
-        SetText(_translated, $"{_busyText}  {BusyFrames[_busyFrame]}");
+        // 안내가 이미 다른 글로 바뀌었으면 멈춘다
+        if (!_translatedIsNote || IsDisposed) { StopBusy(); return; }
+        _busyStep = (_busyStep + 1) % BusySteps.Length;
+        _busyDots.Frame = BusySteps[_busyStep];
+        PlaceBusyDots();   // 그 사이 창 크기나 글자 크기가 바뀌었을 수 있다
+    }
+
+    private void StopBusy()
+    {
+        _busyTimer.Stop();
+        _busyDots.Visible = false;
+    }
+
+    /// <summary>색 점을 안내 글의 마지막 글자 바로 뒤에 놓는다. 번역 칸이 안 보이면 점도 숨긴다</summary>
+    private void PlaceBusyDots()
+    {
+        if (!_busyTimer.Enabled && !_translatedIsNote) return;
+        if (!_translated.Visible || !_translated.IsHandleCreated || _translated.TextLength == 0 || _translated.Width < 40)
+        {
+            _busyDots.Visible = false;
+            return;
+        }
+
+        int last = _translated.TextLength - 1;
+        Point at = _translated.GetPositionFromCharIndex(last);
+        string lastChar = _translated.Text.Substring(last, 1);
+        Size charSize = TextRenderer.MeasureText(lastChar, _translated.Font, Size.Empty, TextFormatFlags.NoPadding);
+        Size size = BusyDots.SizeFor(charSize.Height);
+        Point origin = PointToClient(_translated.PointToScreen(at));
+
+        _busyDots.Size = size;
+        _busyDots.Location = new Point(origin.X + charSize.Width + size.Height / 3, origin.Y);
+        _busyDots.BackColor = Theme.ParseColor(_config.CardColor, Theme.Card);
+        _busyDots.ActiveColor = Theme.ParseColor(_config.AccentColor, Theme.Accent);
+        _busyDots.IdleColor = Theme.ParseColor(_config.FieldColor, Theme.Field);
+        _busyDots.Visible = true;
+        _busyDots.BringToFront();
     }
 
     private void ShowNote(string text, bool busy)
     {
-        if (!busy) _busyTimer.Stop();
+        if (!busy) StopBusy();
         _translatedIsNote = true;
         _engineName = "";   // 번역 중·실패 안내에는 번역기 이름을 붙이지 않는다
         PlaceEngineLabel();
@@ -318,7 +355,7 @@ internal sealed class ResultForm : Form
     /// <summary>번역 칸에 실제 번역문을 보인다(안내 글이었으면 글자 색을 되돌린다)</summary>
     private void ShowTranslation(string text)
     {
-        _busyTimer.Stop();
+        StopBusy();
         _translatedIsNote = false;
         _translated.ForeColor = Theme.ParseColor(_config.TranslatedColor, Theme.Text);
         SetText(_translated, text);
@@ -833,6 +870,7 @@ internal sealed class ResultForm : Form
         {
             if (!IsDisposed)
             {
+                DebugLog.Error("글자 인식", ex);
                 _status.Text = "인식 실패: " + ex.Message;
                 ShowNote("인식 실패: " + ex.Message);
             }
@@ -887,6 +925,9 @@ internal sealed class ResultForm : Form
                 ? $"{Theme.LangName(result.SourceLang)}(감지)"
                 : Theme.LangName(source);
             _status.Text = $"{from} → {Theme.LangName(result.TargetLang)}{note}";
+            if (_config.SaveHistory && result.Text.Length > 0)
+                HistoryStore.Add(new HistoryEntry(DateTime.Now, text, result.Text,
+                    result.SourceLang.Length > 0 ? result.SourceLang : source, result.TargetLang, result.Engine));
             if (_config.CopyTranslation) CopyTranslation();
             ArmAutoClose();
         }

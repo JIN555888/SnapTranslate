@@ -35,6 +35,19 @@ internal static class Program
             catch (ArgumentException) { /* 이미 끝났다 */ }
         }
 
+        // 처리하지 못한 오류는 기록 파일에 남기고, 어디에 남겼는지 알려 준다(신고할 때 그 파일을 보내면 된다)
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) =>
+        {
+            DebugLog.Crash("화면 스레드", e.Exception);
+            MessageBox.Show($"오류가 발생했습니다: {e.Exception.Message}\n\n자세한 내용을 아래 파일에 기록했습니다.\n{DebugLog.FilePath}", AppInfo.Name,
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex) DebugLog.Crash("작업 스레드", ex);
+        };
+
         // 중복 실행 방지
         using var mutex = new Mutex(true, "SnapTranslate.SingleInstance", out bool created);
         if (!created)
@@ -72,6 +85,12 @@ internal sealed class AppConfig
 
     /// <summary>Gemini 모델 이름. 보통 바꿀 일이 없다</summary>
     public string GeminiModel { get; set; } = Translator.DefaultGeminiModel;
+
+    /// <summary>번역한 내용을 실행 파일 옆 history.json 에 남길지(최근 200건). 글 내용이 파일로 남으므로 기본은 끔</summary>
+    public bool SaveHistory { get; set; } = false;
+
+    /// <summary>용어집. 한 줄에 "원문=번역" 한 쌍. 여기 적은 낱말은 정한 대로 번역한다</summary>
+    public List<string> Glossary { get; set; } = [];
 
     /// <summary>번역이 끝나면 번역문을 클립보드에 자동 복사</summary>
     public bool CopyTranslation { get; set; } = false;
@@ -194,6 +213,7 @@ internal sealed class AppConfig
     {
         if (!ShowOriginal && !ShowTranslated) ShowTranslated = true;
         TranslateOrder = Translator.NormalizeSlots(TranslateOrder);
+        Glossary = (Glossary ?? []).Select(line => line.Trim()).Where(line => line.Length > 0).ToList();
         GeminiApiKey = (GeminiApiKey ?? "").Trim();
         if (string.IsNullOrWhiteSpace(GeminiModel)) GeminiModel = Translator.DefaultGeminiModel;
         AutoCloseSeconds = Math.Clamp(AutoCloseSeconds, 0, 600);
@@ -353,10 +373,13 @@ internal sealed class TrayContext : ApplicationContext
     {
         _config = AppConfig.Load(out string? configError);
         _config.Normalize();
-        DebugLog.Enabled = _config.DebugLog;
+        DebugLog.SetEnabled(_config.DebugLog, _config);
+        DebugLog.Write("프로그램 시작");
+        if (configError != null) DebugLog.Write("config.json 읽기 실패, 기본값 사용: " + configError);
 
         var menu = new ContextMenuStrip();
         _captureItem = menu.Items.Add($"영역 캡처 번역 ({_config.Hotkey})", null, (_, _) => StartCapture());
+        menu.Items.Add("번역 기록…", null, (_, _) => OpenHistory());
         menu.Items.Add("설정…", null, (_, _) => OpenSettings());
         _updateItem = menu.Items.Add("업데이트 확인", null, (_, _) => CheckUpdateFromMenu());
         menu.Items.Add(new ToolStripSeparator());
@@ -374,7 +397,7 @@ internal sealed class TrayContext : ApplicationContext
         _hotkey.Pressed += StartCapture;
         if (configError != null)
             _tray.ShowBalloonTip(5000, "SnapTranslate", "config.json 을 읽지 못해 기본값으로 실행합니다: " + configError, ToolTipIcon.Warning);
-        else if (!_hotkey.Register(_config.Hotkey))
+        else if (!RegisterHotkeyLogged())
             _tray.ShowBalloonTip(5000, "SnapTranslate", $"단축키 {_config.Hotkey} 등록 실패. 다른 프로그램이 쓰고 있거나 형식이 잘못됐습니다. config.json 의 Hotkey 를 바꾸세요.", ToolTipIcon.Warning);
         else if (_config.ShowStartupNotice)
             // 시작 안내는 설정에서 켠 경우에만 보인다. 위의 실패 경고는 설정과 관계없이 항상 보인다
@@ -392,10 +415,33 @@ internal sealed class TrayContext : ApplicationContext
         if (_config.CheckUpdateOnStart && AppInfo.Repo.Length > 0) CheckUpdateOnStart();
     }
 
+    private bool RegisterHotkeyLogged()
+    {
+        bool ok = _hotkey.Register(_config.Hotkey);
+        DebugLog.Write($"단축키 {_config.Hotkey} 등록 {(ok ? "성공" : "실패")}");
+        return ok;
+    }
+
+    private HistoryForm? _history;
+
+    /// <summary>번역 기록 창을 띄운다(이미 떠 있으면 앞으로 가져온다)</summary>
+    private void OpenHistory()
+    {
+        if (_history is { IsDisposed: false })
+        {
+            if (_history.WindowState == FormWindowState.Minimized) _history.WindowState = FormWindowState.Normal;
+            _history.Activate();
+            return;
+        }
+        _history = new HistoryForm();
+        _history.Show();
+    }
+
     /// <summary>시작할 때 한 번 새 버전을 확인하고, 있으면 트레이 알림으로 알려 준다(없거나 실패하면 조용히 넘어간다)</summary>
     private async void CheckUpdateOnStart()
     {
         UpdateResult result = await UpdateService.CheckAsync();
+        DebugLog.Write($"시작 시 업데이트 확인: {result.Message} (최신 {result.LatestVersion})");
         if (!result.Available) return;
         _pendingUpdate = result;
         _updateItem.Text = $"업데이트 ({result.LatestVersion})…";
@@ -424,6 +470,7 @@ internal sealed class TrayContext : ApplicationContext
             using var dialog = new SettingsForm(_config, _hotkey.Register);
             if (dialog.ShowDialog() == DialogResult.OK)
             {
+                DebugLog.Write("설정 저장");
                 _captureItem.Text = $"영역 캡처 번역 ({_config.Hotkey})";
                 _tray.Text = $"SnapTranslate ({_config.Hotkey})";
                 foreach (var form in Application.OpenForms.OfType<ResultForm>().ToList())
@@ -502,6 +549,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         catch (Exception ex)
         {
+            DebugLog.Error("캡처", ex);
             MessageBox.Show("캡처 실패: " + ex.Message, "SnapTranslate");
         }
         finally
@@ -539,6 +587,20 @@ internal static class ShotTest
                 Save(settings, Path.Combine(directory, "settings-no-preview.png"));
             }
 
+            // 번역 기록 창(예시 기록으로 모양만 확인. 실제 기록 파일은 건드리지 않는다)
+            var sampleHistory = new List<HistoryEntry>
+            {
+                new(new DateTime(2026, 1, 2, 21, 14, 0), "Autosave is enabled. Your progress will be saved automatically.", "자동 저장이 켜져 있습니다. 진행 상황이 자동으로 저장됩니다.", "en", "ko", Translator.Google),
+                new(new DateTime(2026, 1, 2, 21, 12, 0), "設定を保存しました。ゲームを続けますか?", "설정을 저장했습니다. 게임을 계속하시겠습니까?", "ja", "ko", Translator.Gemini),
+                new(new DateTime(2026, 1, 2, 21, 9, 0), "Mana Potion x3", "마나 물약 x3", "en", "ko", Translator.MyMemory),
+            };
+            using (var history = new HistoryForm(sampleHistory) { Opacity = 0, StartPosition = FormStartPosition.Manual, Location = new Point(0, 0) })
+            {
+                history.Show();
+                Application.DoEvents();
+                Save(history, Path.Combine(directory, "history.png"));
+            }
+
             using (var settings = new SettingsForm(config, _ => true) { Opacity = 0, StartPosition = FormStartPosition.Manual, Location = new Point(0, 0) })
             {
                 settings.Show();
@@ -549,23 +611,27 @@ internal static class ShotTest
                     settings.SelectPage(page);
                     Application.DoEvents();
                     Save(settings, Path.Combine(directory, $"settings-{page}.png"));
+                    // 긴 페이지는 맨 아래도 한 장 남긴다(아래쪽 항목과 여백 확인)
+                    settings.ScrollPageToEnd();
+                    Application.DoEvents();
+                    Save(settings, Path.Combine(directory, $"settings-{page}-end.png"));
                 }
             }
 
             // 포커스 유지 모드: 결과 창을 띄우고 숨겼다 다시 띄워도 맨 앞 창이 바뀌지 않는지 확인한다
             {
-                var lines = new List<string> { "띄우기 전: " + DebugLog.Foreground() };
+                var lines = new List<string> { "띄우기 전: " + DebugLog.ForegroundNow() };
                 var timer = Stopwatch.StartNew();
                 using var probe = new ResultForm(new AppConfig { KeepFocusOnApp = true }, new Rectangle(100, 100, 50, 20), null, () => { }, preview: false) { TestOffscreen = true };
                 probe.Show();
                 Application.DoEvents();
-                lines.Add($"처음 띄운 뒤({timer.ElapsedMilliseconds}ms): " + DebugLog.Foreground());
+                lines.Add($"처음 띄운 뒤({timer.ElapsedMilliseconds}ms): " + DebugLog.ForegroundNow());
                 probe.Hide();
                 Application.DoEvents();
                 timer.Restart();
                 probe.Show();
                 Application.DoEvents();
-                lines.Add($"숨겼다 다시 띄운 뒤({timer.ElapsedMilliseconds}ms): " + DebugLog.Foreground());
+                lines.Add($"숨겼다 다시 띄운 뒤({timer.ElapsedMilliseconds}ms): " + DebugLog.ForegroundNow());
                 File.WriteAllLines(Path.Combine(directory, "focus.txt"), lines);
             }
 
@@ -804,7 +870,30 @@ internal static class SelfTest
                 detectLines.Add($"{name} 그림 → 엔진 {found.Language}: {found.Text}");
             }
 
+            // 용어집: 긴 낱말 먼저, 대소문자 무시, 잘못된 줄은 버림
+            var glossary = Translator.ParseGlossary(["Mana=마나", "mana potion=마나 물약", "잘못된 줄", "=빈원문", "Aerith = 에어리스"]);
+            string glossaryLine = $"용어집 {glossary.Count}개: " + Translator.ApplyGlossary("Aerith drinks a Mana Potion. MANA is full.", glossary);
+
+            // 진단 기록: 꺼져 있으면 파일이 생기지 않고, 켜면 머리말·줄·오류가 적히는지
+            string logLine;
+            {
+                DebugLog.SetEnabled(false, config);
+                DebugLog.Clear(config);
+                DebugLog.Write("꺼진 상태에서 쓴 줄");
+                bool quiet = !DebugLog.Exists && DebugLog.Foreground().Length == 0;
+                DebugLog.SetEnabled(true, config);
+                DebugLog.Write("켠 상태에서 쓴 줄");
+                DebugLog.Error("점검", new InvalidOperationException("점검용 오류"));
+                string written = DebugLog.ReadAll();
+                DebugLog.SetEnabled(false, config);
+                DebugLog.Clear(config);
+                logLine = $"진단 기록: 꺼짐일 때 파일 없음={quiet}, 머리말={written.Contains("진단 기록 시작")}, " +
+                          $"줄={written.Contains("켠 상태에서 쓴 줄")}, 오류={written.Contains("점검용 오류")}, " +
+                          $"키 노출 없음={!written.Contains("GeminiApiKey")}, 지운 뒤 파일 없음={!DebugLog.Exists}";
+            }
+
             File.WriteAllText(outputPath,
+                glossaryLine + "\r\n" + logLine + "\r\n" +
                 $"버전: {AppInfo.VersionText}\r\n업데이트 확인: {update.Message} (최신 {update.LatestVersion})\r\n" +
                 $"읽을 수 있는 언어: {string.Join(", ", OcrService.InstalledLanguageNames())}\r\n" +
                 $"한글 그림 → 엔진 {koreanOcr.Language}: {koreanOcr.Text}\r\n" +
