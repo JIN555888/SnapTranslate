@@ -164,6 +164,9 @@ internal sealed class AppConfig
     /// <summary>영역을 고를 때 드래그 선의 두께(픽셀)</summary>
     public int SelectionLineWidth { get; set; } = 2;
 
+    /// <summary>영역을 고를 때 화면을 어둡게 하는 정도(%). 0 이면 어둡게 하지 않는다</summary>
+    public int SelectionDim { get; set; } = 43;
+
     /// <summary>번역기 이름 표시의 글자 크기(pt)</summary>
     public double EngineBadgeFontSize { get; set; } = 8.5;
 
@@ -197,6 +200,7 @@ internal sealed class AppConfig
         DragHandleSize = other.DragHandleSize;
         SelectionColor = other.SelectionColor;
         SelectionLineWidth = other.SelectionLineWidth;
+        SelectionDim = other.SelectionDim;
         ShowDragHandle = other.ShowDragHandle;
         ShowTitleBar = other.ShowTitleBar;
         ShowLanguageRow = other.ShowLanguageRow;
@@ -248,6 +252,7 @@ internal sealed class AppConfig
         EngineBadgeFontSize = Math.Clamp(EngineBadgeFontSize, 6, 20);
         DragHandleSize = Math.Clamp(DragHandleSize, 8, 40);
         SelectionLineWidth = Math.Clamp(SelectionLineWidth, 1, 10);
+        SelectionDim = Math.Clamp(SelectionDim, 0, 90);
     }
 
     public void Save()
@@ -538,7 +543,7 @@ internal sealed class TrayContext : ApplicationContext
             Rectangle selection;
             timer.Restart();
             using (var overlay = new OverlayForm(shot, screen, _config.KeepFocusOnApp,
-                       Theme.ParseColor(_config.SelectionColor, Color.FromArgb(0, 174, 255)), _config.SelectionLineWidth))
+                       Theme.ParseColor(_config.SelectionColor, Color.FromArgb(0, 174, 255)), _config.SelectionLineWidth, _config.SelectionDim))
             {
                 DebugLog.Write($"선택 화면 준비 {timer.ElapsedMilliseconds}ms");
                 // 포커스를 가져오지 않는 모드에서는 선택 화면이 키를 받지 못하므로, 선택하는 동안만 Esc 를 전역 단축키로 건다

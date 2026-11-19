@@ -81,6 +81,7 @@ internal sealed class SettingsForm : Form
     private readonly ValueSlider _handleSize;     // 창 이동 손잡이 크기
     private readonly Button _selectionColor;      // 영역 고를 때 드래그 선 색
     private readonly ValueSlider _selectionWidth; // 영역 고를 때 드래그 선 두께
+    private readonly ValueSlider _selectionDim;   // 영역 고를 때 화면 어둡게 하는 정도
     private readonly CheckBox _showHandle;        // 창 이동 손잡이 표시
 
     private readonly CheckBox _showTitleBar;
@@ -218,6 +219,7 @@ internal sealed class SettingsForm : Form
         _handleSize = new ValueSlider(8, 40, 1, " px", Theme.Card);
         _selectionColor = CreateColorButton();
         _selectionWidth = new ValueSlider(1, 10, 1, " px", Theme.Card);
+        _selectionDim = new ValueSlider(0, 90, 1, " %", Theme.Card);
         _showHandle = CreateCheck("창 이동 손잡이 (왼쪽 위)");
         var reset = new Button { Text = "기본 모양으로" };
         Theme.StyleButton(reset, false);
@@ -336,6 +338,8 @@ internal sealed class SettingsForm : Form
         AddSeparator(grid);
         AddRow(grid, "영역 고를 때 선", _selectionColor);
         AddRow(grid, "영역 고를 때 선 두께", _selectionWidth);
+        AddRow(grid, "영역 고를 때 화면 어둡게", _selectionDim);
+        AddHint(grid, "0 % 면 화면을 어둡게 하지 않습니다");
         AddSeparator(grid);
         AddRow(grid, "크기·글자·색·표시 항목", reset);
 
@@ -659,6 +663,7 @@ internal sealed class SettingsForm : Form
             _handleSize.Value = c.DragHandleSize;
             _selectionColor.BackColor = Theme.ParseColor(c.SelectionColor, Color.FromArgb(0, 174, 255));
             _selectionWidth.Value = c.SelectionLineWidth;
+            _selectionDim.Value = c.SelectionDim;
 
             _showTitleBar.Checked = c.ShowTitleBar;
             _showLanguageRow.Checked = c.ShowLanguageRow;
@@ -720,6 +725,7 @@ internal sealed class SettingsForm : Form
         c.DragHandleSize = (int)_handleSize.Value;
         c.SelectionColor = Theme.ToHex(_selectionColor.BackColor);
         c.SelectionLineWidth = (int)_selectionWidth.Value;
+        c.SelectionDim = (int)_selectionDim.Value;
 
         c.ShowTitleBar = _showTitleBar.Checked;
         c.ShowLanguageRow = _showLanguageRow.Checked;
