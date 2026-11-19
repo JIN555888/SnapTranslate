@@ -50,12 +50,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _startupNotice;
     private readonly CheckBox _autostart;     // Windows 시작 시 자동 실행(레지스트리에 등록)
     private readonly CheckBox _saveHistory;   // 번역 기록 저장
-    private readonly ListBox _glossary;       // 용어집 목록(한 칸에 낱말 한 쌍)
-    private readonly TextBox _termSource;     // 추가할 낱말의 원문
-    private readonly TextBox _termTarget;     // 추가할 낱말의 번역
-    private readonly Button _termAdd;
-    private readonly Button _termRemove;
-    private readonly Label _termCount;
+    private readonly GlossaryEditor _glossary;   // 용어집 편집 표
     private readonly CheckBox _debugLog;      // 진단 기록 남기기
     private readonly Label _logStatus;        // 진단 기록 파일 상태
     private readonly Label _ocrInstalled;   // "읽을 수 있는 언어" 표시
@@ -166,40 +161,7 @@ internal sealed class SettingsForm : Form
         _startupNotice = CreateCheck("시작할 때 Windows 알림 표시");
         _autostart = CreateCheck("Windows 시작 시 자동 실행");
         _saveHistory = CreateCheck("번역 기록 저장 (최근 200건)");
-        _glossary = new ListBox
-        {
-            BackColor = Theme.Field,
-            ForeColor = Theme.Text,
-            BorderStyle = BorderStyle.FixedSingle,
-            IntegralHeight = false,
-            DrawMode = DrawMode.OwnerDrawFixed,
-            ItemHeight = 26,
-            Size = new Size(430, 210),
-            Margin = new Padding(3, 6, 3, 4),
-        };
-        Theme.DarkControl(_glossary);
-        _glossary.DrawItem += OnDrawTerm;
-        _glossary.SelectedIndexChanged += (_, _) => OnTermSelected();
-        _glossary.KeyDown += (_, e) => { if (e.KeyCode == Keys.Delete) RemoveTerm(); };
-        _termSource = CreateTermBox("원문 (예: Mana Potion)");
-        _termTarget = CreateTermBox("번역 (예: 마나 물약)");
-        // 두 칸 어디서든 Enter 를 누르면 추가한다
-        foreach (var box in new[] { _termSource, _termTarget })
-            box.KeyDown += (_, e) =>
-            {
-                if (e.KeyCode != Keys.Enter) return;
-                e.SuppressKeyPress = true;   // 삑 소리와 저장 단추 눌림을 막는다
-                AddTerm();
-            };
-        _termAdd = new Button { Text = "추가" };
-        Theme.StyleButton(_termAdd, true);
-        _termAdd.Margin = new Padding(6, 3, 0, 3);
-        _termAdd.Click += (_, _) => AddTerm();
-        _termRemove = new Button { Text = "고른 낱말 삭제", Enabled = false };
-        Theme.StyleButton(_termRemove, false);
-        _termRemove.Margin = new Padding(3, 2, 8, 4);
-        _termRemove.Click += (_, _) => RemoveTerm();
-        _termCount = new Label { AutoSize = true, ForeColor = Theme.SubText, Margin = new Padding(3, 9, 3, 0) };
+        _glossary = new GlossaryEditor { Size = new Size(440, 300), Margin = new Padding(3, 8, 3, 6) };
         _debugLog = CreateCheck("진단 기록 남기기 (문제 신고용)");
         _logStatus = new Label { AutoSize = true, ForeColor = Theme.SubText, Margin = new Padding(3, 4, 3, 4) };
 
@@ -320,11 +282,9 @@ internal sealed class SettingsForm : Form
         AddHint(grid, "키는 이 PC 의 config.json 에만 저장됩니다");
 
         grid = NewPage("용어집", "정해 둔 낱말은 항상 같은 말로 번역");
-        AddWide(grid, new Label { Text = "낱말과 번역을 적고 추가를 누르세요 (Enter 로도 추가)", AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(3, 4, 3, 2) });
-        AddWide(grid, Row(_termSource, new Label { Text = "→", AutoSize = true, ForeColor = Theme.SubText, Margin = new Padding(4, 7, 4, 0) }, _termTarget, _termAdd));
+        AddWide(grid, new Label { Text = "원문과 번역을 적고 추가를 누르세요 (Enter 로도 추가)", AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(3, 4, 3, 0) });
         AddWide(grid, _glossary);
-        AddWide(grid, Row(_termRemove, _termCount));
-        AddWide(grid, new Label { Text = "목록에서 고르면 위 칸에 불러와 고칠 수 있습니다.\r\n같은 원문을 다시 추가하면 번역이 바뀝니다. 삭제는 Delete 키로도 됩니다.", AutoSize = true, ForeColor = Theme.SubText, Font = new Font(Theme.FontName, 8.5f), Margin = new Padding(3, 0, 3, 6) });
+        AddWide(grid, new Label { Text = "줄을 누르면 위 칸에 불러와 고칠 수 있습니다. 줄 끝의 ✕ 로 지웁니다.", AutoSize = true, ForeColor = Theme.SubText, Font = new Font(Theme.FontName, 8.5f), Margin = new Padding(3, 0, 3, 6) });
         AddWide(grid, new Label { Text = "게임 고유 명사, 캐릭터 이름처럼 번역이 매번 달라지는 낱말에 씁니다.\r\n대소문자는 구분하지 않습니다. Gemini 에서 가장 정확하게 적용됩니다.", AutoSize = true, ForeColor = Theme.SubText, Font = new Font(Theme.FontName, 8.5f), Margin = new Padding(3, 0, 3, 4) });
 
         grid = NewPage("크기", "결과 창의 불투명도와 가로·세로 크기");
@@ -522,100 +482,6 @@ internal sealed class SettingsForm : Form
         if (!_config.ShowSettingsPreview) SetPreviewVisible(false);
     }
 
-    // ---- 용어집 ----
-    // 목록 한 칸은 LangItem(Code = 원문, Name = 번역)으로 둔다
-
-    private static TextBox CreateTermBox(string placeholder) => new()
-    {
-        BackColor = Theme.Field,
-        ForeColor = Theme.Text,
-        BorderStyle = BorderStyle.FixedSingle,
-        Width = 160,
-        PlaceholderText = placeholder,
-        Margin = new Padding(3, 4, 0, 3),
-    };
-
-    /// <summary>위 두 칸의 낱말을 목록에 넣는다. 같은 원문이 이미 있으면 번역만 바꾼다</summary>
-    private void AddTerm()
-    {
-        // 저장 형식이 "원문=번역" 이라 원문에는 등호를 쓸 수 없다
-        string source = _termSource.Text.Trim();
-        string target = _termTarget.Text.Trim();
-        if (source.Length == 0) { _termSource.Focus(); return; }
-        if (target.Length == 0) { _termTarget.Focus(); return; }
-        if (source.Contains('='))
-        {
-            _termCount.Text = "원문에는 = 를 쓸 수 없습니다";
-            _termSource.Focus();
-            return;
-        }
-
-        var item = new LangItem(source, target);
-        int existing = -1;
-        for (int i = 0; i < _glossary.Items.Count; i++)
-            if (_glossary.Items[i] is LangItem term && term.Code.Equals(source, StringComparison.OrdinalIgnoreCase))
-                existing = i;
-
-        if (existing >= 0) _glossary.Items[existing] = item;
-        else existing = _glossary.Items.Add(item);
-
-        _glossary.SelectedIndex = -1;
-        _glossary.TopIndex = Math.Max(0, existing - 3);
-        _termSource.Clear();
-        _termTarget.Clear();
-        _termSource.Focus();   // 이어서 다음 낱말을 바로 적을 수 있게
-        UpdateTermCount();
-    }
-
-    private void RemoveTerm()
-    {
-        int index = _glossary.SelectedIndex;
-        if (index < 0) return;
-        _glossary.Items.RemoveAt(index);
-        _glossary.SelectedIndex = Math.Min(index, _glossary.Items.Count - 1);
-        if (_glossary.Items.Count == 0)
-        {
-            _termSource.Clear();
-            _termTarget.Clear();
-        }
-        UpdateTermCount();
-    }
-
-    /// <summary>목록에서 고른 낱말을 위 칸에 불러온다(고친 뒤 추가를 누르면 바뀐다)</summary>
-    private void OnTermSelected()
-    {
-        _termRemove.Enabled = _glossary.SelectedIndex >= 0;
-        if (_glossary.SelectedItem is not LangItem term) return;
-        _termSource.Text = term.Code;
-        _termTarget.Text = term.Name;
-    }
-
-    private void UpdateTermCount()
-    {
-        _termRemove.Enabled = _glossary.SelectedIndex >= 0;
-        _termCount.Text = _glossary.Items.Count == 0 ? "아직 낱말이 없습니다" : $"낱말 {_glossary.Items.Count}개";
-    }
-
-    /// <summary>목록 한 칸: 원문 → 번역</summary>
-    private void OnDrawTerm(object? sender, DrawItemEventArgs e)
-    {
-        if (e.Index < 0 || e.Index >= _glossary.Items.Count || _glossary.Items[e.Index] is not LangItem term) return;
-        bool selected = (e.State & DrawItemState.Selected) != 0;
-        using var back = new SolidBrush(selected ? Theme.Accent : Theme.Field);
-        e.Graphics.FillRectangle(back, e.Bounds);
-
-        Color main = selected ? Theme.ContrastText(Theme.Accent) : Theme.Text;
-        Color sub = selected ? main : Theme.SubText;
-        const TextFormatFlags flags = TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter;
-        int half = (e.Bounds.Width - 44) / 2;
-        var left = new Rectangle(e.Bounds.X + 8, e.Bounds.Y, half, e.Bounds.Height);
-        var arrow = new Rectangle(left.Right, e.Bounds.Y, 28, e.Bounds.Height);
-        var right = new Rectangle(arrow.Right, e.Bounds.Y, half, e.Bounds.Height);
-        TextRenderer.DrawText(e.Graphics, term.Code, _glossary.Font, left, main, flags);
-        TextRenderer.DrawText(e.Graphics, "→", _glossary.Font, arrow, sub, flags | TextFormatFlags.HorizontalCenter);
-        TextRenderer.DrawText(e.Graphics, term.Name, _glossary.Font, right, main, flags);
-    }
-
     /// <summary>진단 기록을 켜거나 끈다. 저장 단추와 관계없이 바로 적용하고 설정 파일에도 적는다</summary>
     private void OnDebugLogToggled()
     {
@@ -731,10 +597,7 @@ internal sealed class SettingsForm : Form
             _startupNotice.Checked = c.ShowStartupNotice;
             _autostart.Checked = Autostart.IsEnabled();   // 설정 파일이 아니라 실제 등록 상태를 보인다
             _saveHistory.Checked = c.SaveHistory;
-            _glossary.Items.Clear();
-            foreach (var (source, target) in Translator.ParseGlossary(c.Glossary).OrderBy(term => term.Source, StringComparer.OrdinalIgnoreCase))
-                _glossary.Items.Add(new LangItem(source, target));
-            UpdateTermCount();
+            _glossary.SetLines(c.Glossary);
             _debugLog.Checked = c.DebugLog;
             UpdateLogStatus();
             var order = Translator.NormalizeSlots(c.TranslateOrder);
@@ -792,7 +655,7 @@ internal sealed class SettingsForm : Form
         c.CheckUpdateOnStart = _checkUpdate.Checked;
         c.ShowStartupNotice = _startupNotice.Checked;
         c.SaveHistory = _saveHistory.Checked;
-        c.Glossary = _glossary.Items.OfType<LangItem>().Select(term => $"{term.Code}={term.Name}").ToList();
+        c.Glossary = _glossary.GetLines();
         c.DebugLog = _debugLog.Checked;
         c.TranslateOrder = Translator.NormalizeSlots(_engines.Select(combo => (combo.SelectedItem as LangItem)?.Code ?? ""));
         c.GeminiApiKey = _geminiKey.Text.Trim();
